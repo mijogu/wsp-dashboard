@@ -717,29 +717,26 @@
         // Data Loading
         // ============================================================================
         async function loadAllData() {
-            try {
-                const [ur, cf, mwp] = await Promise.all([
-                    getUptimeRobot(),
-                    getCloudflare(),
-                    getMainWP(),
-                ]);
+            // Fetch each source independently — unconfigured services return
+            // null instead of blowing up the whole dashboard
+            const [ur, cf, mwp] = await Promise.all([
+                getUptimeRobot().catch(e => { console.warn('Uptime Robot:', e.message); return null; }),
+                getCloudflare().catch(e => { console.warn('Cloudflare:', e.message); return null; }),
+                getMainWP().catch(e => { console.warn('MainWP:', e.message); return null; }),
+            ]);
 
-                appState.data.uptimeRobot = ur;
-                appState.data.cloudflare = cf;
-                appState.data.mainwp = mwp;
+            appState.data.uptimeRobot = ur;
+            appState.data.cloudflare = cf;
+            appState.data.mainwp = mwp;
 
-                appState.lastRefreshTime = new Date();
-                updateLastUpdatedTime();
+            appState.lastRefreshTime = new Date();
+            updateLastUpdatedTime();
 
-                renderOverview();
-                renderUptime();
-                await renderCloudflare();
-                await renderMainWP();
-                renderDowntimeLog();
-            } catch (error) {
-                console.error('Failed to load data:', error);
-                alert('Failed to load dashboard data. Please check your API keys in Settings.');
-            }
+            renderOverview();
+            renderUptime();
+            await renderCloudflare();
+            await renderMainWP();
+            renderDowntimeLog();
         }
 
         function updateLastUpdatedTime() {
