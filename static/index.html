@@ -382,8 +382,8 @@
     <!-- Passphrase Modal -->
     <div id="passphraseOverlay" class="modal-overlay">
         <div class="modal">
-            <h2>Dashboard Locked</h2>
-            <p>Enter passphrase to unlock and view monitoring data.</p>
+            <h2 id="passphraseTitle">Dashboard Locked</h2>
+            <p id="passphraseDesc">Enter passphrase to unlock and view monitoring data.</p>
             <div class="form-group">
                 <input type="password" id="passphraseInput" placeholder="Passphrase">
             </div>
@@ -552,19 +552,24 @@
         async function initApp() {
             try {
                 const status = await getStatus();
-                appState.unlocked = !status.hasConfig;
+                appState.unlocked = false;
                 appState.hasConfig = status.hasConfig;
 
-                if (status.hasConfig && !status.unlocked) {
-                    showPassphraseModal();
+                if (status.hasConfig) {
+                    // Returning user — unlock existing config
+                    document.getElementById('passphraseTitle').textContent = 'Dashboard Locked';
+                    document.getElementById('passphraseDesc').textContent = 'Enter your passphrase to unlock and view monitoring data.';
+                    document.getElementById('unlockBtn').textContent = 'Unlock';
                 } else {
-                    hidePassphraseModal();
-                    await loadAllData();
-                    startAutoRefresh();
+                    // First run — set a new passphrase
+                    document.getElementById('passphraseTitle').textContent = 'Welcome';
+                    document.getElementById('passphraseDesc').textContent = 'Choose a passphrase to encrypt your API keys. You\'ll enter this each time you start the dashboard.';
+                    document.getElementById('unlockBtn').textContent = 'Set Passphrase';
                 }
+                showPassphraseModal();
             } catch (error) {
                 console.error('Failed to initialize app:', error);
-                alert('Failed to initialize dashboard. Please refresh.');
+                alert('Failed to connect to the dashboard server. Is server.py running?');
             }
         }
 
