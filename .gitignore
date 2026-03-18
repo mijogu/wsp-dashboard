@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+venv/
+.env
+*.log
+
+# Encrypted config file contains API keys — do NOT commit
+config.enc

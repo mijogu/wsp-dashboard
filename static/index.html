@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WP Maintenance Dashboard</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface-2: #232733;
+            --border: #2e3241;
+            --text: #e4e6ed;
+            --text-muted: #8b8fa3;
+            --accent: #6c72ff;
+            --accent-glow: rgba(108,114,255,0.15);
+            --green: #34d399;
+            --green-bg: rgba(52,211,153,0.1);
+            --yellow: #fbbf24;
+            --yellow-bg: rgba(251,191,36,0.1);
+            --red: #f87171;
+            --red-bg: rgba(248,113,113,0.1);
+            --orange: #fb923c;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header-left { display: flex; align-items: center; gap: 16px; }
+        .header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
+        .header-right { display: flex; align-items: center; gap: 12px; }
+        .last-updated { font-size: 12px; color: var(--text-muted); }
+
+        .btn {
+            padding: 7px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            color: var(--text);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn:hover { background: var(--border); }
+        .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .btn-primary:hover { opacity: 0.9; }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+        .alert-banner {
+            background: var(--red-bg);
+            border: 1px solid rgba(248,113,113,0.3);
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .alert-banner.visible { display: block; }
+        .alert-banner h3 { font-size: 14px; font-weight: 600; color: var(--red); margin-bottom: 6px; }
+        .alert-banner .alert-items { font-size: 13px; color: var(--text-muted); }
+        .alert-banner .alert-item { padding: 4px 0; display: flex; align-items: center; gap: 8px; }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px 20px;
+        }
+        .stat-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .stat-value { font-size: 28px; font-weight: 700; letter-spacing: -1px; }
+        .stat-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+        .stat-value.green { color: var(--green); }
+        .stat-value.yellow { color: var(--yellow); }
+        .stat-value.red { color: var(--red); }
+
+        .section { margin-bottom: 24px; }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .section-title { font-size: 15px; font-weight: 600; }
+        .section-badge {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+        .badge-red { background: var(--red-bg); color: var(--red); }
+        .badge-yellow { background: var(--yellow-bg); color: var(--yellow); }
+        .badge-green { background: var(--green-bg); color: var(--green); }
+
+        .sites-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 12px;
+        }
+        .site-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 18px;
+            transition: border-color 0.15s;
+        }
+        .site-card:hover { border-color: var(--accent); }
+        .site-card.status-down { border-left: 3px solid var(--red); }
+        .site-card.status-degraded { border-left: 3px solid var(--yellow); }
+        .site-card.status-ok { border-left: 3px solid var(--green); }
+        .site-card.status-paused { border-left: 3px solid var(--text-muted); }
+
+        .site-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .site-name { font-size: 14px; font-weight: 600; }
+        .site-url { font-size: 11px; color: var(--text-muted); }
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+        }
+        .status-dot.up { background: var(--green); box-shadow: 0 0 6px var(--green); }
+        .status-dot.down { background: var(--red); box-shadow: 0 0 6px var(--red); animation: pulse 1.5s infinite; }
+        .status-dot.paused { background: var(--text-muted); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .site-metrics { display: flex; gap: 16px; flex-wrap: wrap; }
+        .metric { font-size: 12px; }
+        .metric-label { color: var(--text-muted); }
+        .metric-val { font-weight: 600; margin-left: 4px; }
+
+        .rt-bar-wrap { height: 4px; background: var(--surface-2); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+        .rt-bar { height: 100%; border-radius: 2px; transition: width 0.3s; }
+        .rt-bar.fast { background: var(--green); }
+        .rt-bar.medium { background: var(--yellow); }
+        .rt-bar.slow { background: var(--red); }
+
+        .log-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .log-table th {
+            text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase;
+            letter-spacing: 0.5px; color: var(--text-muted); border-bottom: 1px solid var(--border); font-weight: 500;
+        }
+        .log-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text); }
+        .log-table tr:last-child td { border-bottom: none; }
+        .log-table-wrap {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+        }
+        .duration-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+        .dur-short { background: var(--yellow-bg); color: var(--yellow); }
+        .dur-long { background: var(--red-bg); color: var(--red); }
+
+        .cf-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px;
+        }
+        .cf-card {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px;
+        }
+        .cf-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+        .cf-stat-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+        .cf-stat-row .label { color: var(--text-muted); }
+
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+            z-index: 200; display: none; align-items: center; justify-content: center;
+        }
+        .modal-overlay.visible { display: flex; }
+        .modal {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+            padding: 28px; width: 480px; max-width: 90vw;
+        }
+        .modal h2 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+        .modal p { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+        .form-group input {
+            width: 100%; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border);
+            background: var(--surface-2); color: var(--text); font-size: 13px;
+            font-family: 'SF Mono', SFMono-Regular, monospace;
+        }
+        .form-group input:focus { outline: none; border-color: var(--accent); }
+        .form-group .hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+
+        .empty-state {
+            text-align: center; padding: 60px 20px; background: var(--surface);
+            border: 1px dashed var(--border); border-radius: 10px;
+        }
+        .empty-state h3 { font-size: 16px; margin-bottom: 8px; }
+        .empty-state p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+
+        .tabs { display: inline-flex; gap: 2px; margin-bottom: 20px; background: var(--surface); border-radius: 8px; padding: 3px; border: 1px solid var(--border); }
+        .tab {
+            padding: 7px 16px; font-size: 13px; border-radius: 6px; cursor: pointer;
+            color: var(--text-muted); transition: all 0.15s; border: none; background: none;
+        }
+        .tab:hover { color: var(--text); }
+        .tab.active { background: var(--accent); color: #fff; }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .modal-section { margin-bottom: 20px; }
+        .modal-section h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; color: var(--text-muted); }
+        .modal-buttons { display: flex; gap: 8px; }
+        .modal-buttons .btn { flex: 1; }
+
+        .status-text { font-size: 13px; margin-bottom: 16px; }
+        .status-text.loading { color: var(--text-muted); }
+        .status-text.error { color: var(--red); }
+        .status-text.success { color: var(--green); }
+
+        @media (max-width: 768px) {
+            .container { padding: 16px; }
+            .sites-grid, .cf-grid { grid-template-columns: 1fr; }
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <h1>WP Maintenance Dashboard</h1>
+        </div>
+        <div class="header-right">
+            <select id="refreshInterval" class="btn">
+                <option value="300000">5 min</option>
+                <option value="600000">10 min</option>
+                <option value="900000">15 min</option>
+                <option value="1800000">30 min</option>
+            </select>
+            <button class="btn" id="refreshBtn" title="Refresh now">Refresh</button>
+            <button class="btn" id="settingsBtn" title="Settings & API Keys">Settings</button>
+            <div class="last-updated">
+                Last updated: <span id="lastUpdated">never</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+        <!-- Tab Navigation -->
+        <div class="tabs" id="tabNav">
+            <button class="tab active" data-tab="overview">Overview</button>
+            <button class="tab" data-tab="uptime">Uptime</button>
+            <button class="tab" data-tab="cloudflare">Cloudflare</button>
+            <button class="tab" data-tab="mainwp">MainWP</button>
+            <button class="tab" data-tab="downtime">Downtime Log</button>
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="overview" class="tab-content active">
+            <div id="alertBanner" class="alert-banner">
+                <h3>⚠️ Attention Required</h3>
+                <div class="alert-items" id="alertItems"></div>
+            </div>
+
+            <div class="stats-row" id="statsRow"></div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">All Sites</div>
+                </div>
+                <div class="sites-grid" id="overviewGrid"></div>
+            </div>
+        </div>
+
+        <!-- Uptime Tab -->
+        <div id="uptime" class="tab-content">
+            <div class="sites-grid" id="uptimeGrid"></div>
+        </div>
+
+        <!-- Cloudflare Tab -->
+        <div id="cloudflare" class="tab-content">
+            <div class="stats-row" id="cfStatsRow"></div>
+            <div class="cf-grid" id="cfGrid"></div>
+        </div>
+
+        <!-- MainWP Tab -->
+        <div id="mainwp" class="tab-content">
+            <div class="stats-row" id="mwpStatsRow"></div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">WordPress Core Updates</div>
+                </div>
+                <div class="log-table-wrap">
+                    <table class="log-table" id="coreUpdatesTable">
+                        <thead>
+                            <tr>
+                                <th>Site</th>
+                                <th>Current Version</th>
+                                <th>Latest Version</th>
+                                <th>Available</th>
+                            </tr>
+                        </thead>
+                        <tbody id="coreUpdatesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Updates by Site</div>
+                </div>
+                <div class="sites-grid" id="mwpSitesGrid"></div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Most Common Plugin Updates</div>
+                </div>
+                <div class="log-table-wrap">
+                    <table class="log-table" id="pluginUpdatesTable">
+                        <thead>
+                            <tr>
+                                <th>Plugin</th>
+                                <th>Sites Needing Update</th>
+                                <th>Latest Version</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pluginUpdatesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">All Child Sites</div>
+                </div>
+                <div class="sites-grid" id="allMwpSitesGrid"></div>
+            </div>
+        </div>
+
+        <!-- Downtime Log Tab -->
+        <div id="downtime" class="tab-content">
+            <div class="log-table-wrap">
+                <table class="log-table" id="downtimeTable">
+                    <thead>
+                        <tr>
+                            <th>Site</th>
+                            <th>Down At</th>
+                            <th>Up At</th>
+                            <th>Duration</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="downtimeBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Passphrase Modal -->
+    <div id="passphraseOverlay" class="modal-overlay">
+        <div class="modal">
+            <h2>Dashboard Locked</h2>
+            <p>Enter passphrase to unlock and view monitoring data.</p>
+            <div class="form-group">
+                <input type="password" id="passphraseInput" placeholder="Passphrase">
+            </div>
+            <div id="passphraseError" class="status-text error" style="display: none;"></div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" id="unlockBtn">Unlock</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsOverlay" class="modal-overlay">
+        <div class="modal">
+            <h2>Settings & Configuration</h2>
+            <p>Manage your API keys and configuration.</p>
+
+            <div class="modal-section">
+                <h3>Uptime Robot</h3>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="urApiKey" placeholder="Your Uptime Robot API key">
+                </div>
+            </div>
+
+            <div class="modal-section">
+                <h3>Cloudflare</h3>
+                <div class="form-group">
+                    <label>API Token</label>
+                    <input type="password" id="cfApiToken" placeholder="Your Cloudflare API token">
+                </div>
+                <div class="form-group">
+                    <label>Account ID</label>
+                    <input type="text" id="cfAccountId" placeholder="Your Cloudflare Account ID">
+                </div>
+            </div>
+
+            <div class="modal-section">
+                <h3>MainWP</h3>
+                <div class="form-group">
+                    <label>Dashboard URL</label>
+                    <input type="text" id="mwpUrl" placeholder="https://your-mainwp-dashboard.com">
+                </div>
+                <div class="form-group">
+                    <label>API Key (Bearer Token)</label>
+                    <input type="password" id="mwpApiKey" placeholder="Your MainWP API key">
+                </div>
+            </div>
+
+            <div class="modal-section">
+                <h3>Backup & Restore</h3>
+                <div class="modal-buttons">
+                    <button class="btn" id="exportBtn">Export Settings</button>
+                    <button class="btn" id="importBtn">Import Settings</button>
+                </div>
+                <input type="file" id="importFile" style="display: none;" accept=".json">
+            </div>
+
+            <div id="settingsStatus" class="status-text" style="display: none;"></div>
+
+            <div class="modal-actions">
+                <button class="btn" id="settingsCloseBtn">Close</button>
+                <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================================
+        // State & Configuration
+        // ============================================================================
+        let appState = {
+            unlocked: false,
+            hasConfig: false,
+            currentTab: 'overview',
+            autoRefreshTimer: null,
+            lastRefreshTime: null,
+            data: {
+                uptimeRobot: null,
+                cloudflare: null,
+                mainwp: null,
+            },
+        };
+
+        const CONFIG = {
+            API_BASE: '/',
+            REFRESH_INTERVAL_KEY: 'dashboardRefreshInterval',
+            DEFAULT_REFRESH_INTERVAL: 300000,
+        };
+
+        // ============================================================================
+        // API Calls
+        // ============================================================================
+        async function apiCall(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${CONFIG.API_BASE}api${endpoint}`, {
+                    headers: { 'Content-Type': 'application/json' },
+                    ...options,
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+                return data;
+            } catch (error) {
+                console.error(`API Error (${endpoint}):`, error);
+                throw error;
+            }
+        }
+
+        async function getStatus() {
+            return apiCall('/status');
+        }
+
+        async function unlock(passphrase) {
+            return apiCall('/unlock', {
+                method: 'POST',
+                body: JSON.stringify({ passphrase }),
+            });
+        }
+
+        async function getSettings() {
+            return apiCall('/settings');
+        }
+
+        async function saveSettings(settings) {
+            return apiCall('/settings', {
+                method: 'POST',
+                body: JSON.stringify({ settings }),
+            });
+        }
+
+        async function getUptimeRobot() {
+            return apiCall('/uptime-robot');
+        }
+
+        async function getCloudflare() {
+            return apiCall('/cloudflare/zones');
+        }
+
+        async function getCloudflareAnalytics(zoneId) {
+            return apiCall(`/cloudflare/analytics/${zoneId}`);
+        }
+
+        async function getMainWP() {
+            return apiCall('/mainwp/sites');
+        }
+
+        async function getMainWPUpdates() {
+            return apiCall('/mainwp/updates');
+        }
+
+        async function exportData() {
+            return apiCall('/export');
+        }
+
+        async function importData(data) {
+            return apiCall('/import', {
+                method: 'POST',
+                body: JSON.stringify({ data }),
+            });
+        }
+
+        // ============================================================================
+        // Initialize App
+        // ============================================================================
+        async function initApp() {
+            try {
+                const status = await getStatus();
+                appState.unlocked = !status.hasConfig;
+                appState.hasConfig = status.hasConfig;
+
+                if (status.hasConfig && !status.unlocked) {
+                    showPassphraseModal();
+                } else {
+                    hidePassphraseModal();
+                    await loadAllData();
+                    startAutoRefresh();
+                }
+            } catch (error) {
+                console.error('Failed to initialize app:', error);
+                alert('Failed to initialize dashboard. Please refresh.');
+            }
+        }
+
+        // ============================================================================
+        // Passphrase Modal
+        // ============================================================================
+        function showPassphraseModal() {
+            document.getElementById('passphraseOverlay').classList.add('visible');
+        }
+
+        function hidePassphraseModal() {
+            document.getElementById('passphraseOverlay').classList.remove('visible');
+        }
+
+        document.getElementById('unlockBtn').addEventListener('click', async () => {
+            const passphrase = document.getElementById('passphraseInput').value.trim();
+            if (!passphrase) return;
+
+            try {
+                document.getElementById('passphraseError').style.display = 'none';
+                const result = await unlock(passphrase);
+                if (result.error) {
+                    document.getElementById('passphraseError').textContent = result.error;
+                    document.getElementById('passphraseError').style.display = 'block';
+                } else {
+                    appState.unlocked = true;
+                    hidePassphraseModal();
+                    await loadAllData();
+                    startAutoRefresh();
+                }
+            } catch (error) {
+                document.getElementById('passphraseError').textContent = 'Error unlocking dashboard';
+                document.getElementById('passphraseError').style.display = 'block';
+            }
+        });
+
+        document.getElementById('passphraseInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('unlockBtn').click();
+            }
+        });
+
+        // ============================================================================
+        // Settings Modal
+        // ============================================================================
+        function showSettingsModal() {
+            document.getElementById('settingsOverlay').classList.add('visible');
+        }
+
+        function hideSettingsModal() {
+            document.getElementById('settingsOverlay').classList.remove('visible');
+        }
+
+        document.getElementById('settingsBtn').addEventListener('click', async () => {
+            try {
+                const settings = await getSettings();
+                document.getElementById('urApiKey').value = settings.urApiKey || '';
+                document.getElementById('cfApiToken').value = settings.cfApiToken || '';
+                document.getElementById('cfAccountId').value = settings.cfAccountId || '';
+                document.getElementById('mwpUrl').value = settings.mwpUrl || '';
+                document.getElementById('mwpApiKey').value = settings.mwpApiKey || '';
+                document.getElementById('settingsStatus').style.display = 'none';
+                showSettingsModal();
+            } catch (error) {
+                alert('Failed to load settings');
+            }
+        });
+
+        document.getElementById('settingsCloseBtn').addEventListener('click', hideSettingsModal);
+
+        document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
+            const settings = {
+                urApiKey: document.getElementById('urApiKey').value.trim(),
+                cfApiToken: document.getElementById('cfApiToken').value.trim(),
+                cfAccountId: document.getElementById('cfAccountId').value.trim(),
+                mwpUrl: document.getElementById('mwpUrl').value.trim(),
+                mwpApiKey: document.getElementById('mwpApiKey').value.trim(),
+            };
+
+            try {
+                const result = await saveSettings(settings);
+                if (result.ok) {
+                    showStatus('settingsStatus', 'Settings saved successfully', 'success');
+                    setTimeout(() => {
+                        hideSettingsModal();
+                        loadAllData();
+                    }, 1000);
+                } else {
+                    showStatus('settingsStatus', 'Failed to save settings', 'error');
+                }
+            } catch (error) {
+                showStatus('settingsStatus', 'Error saving settings', 'error');
+            }
+        });
+
+        document.getElementById('exportBtn').addEventListener('click', async () => {
+            try {
+                const result = await exportData();
+                const element = document.createElement('a');
+                element.setAttribute('href', `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(JSON.parse(atob(result.data)), null, 2))}`);
+                element.setAttribute('download', `dashboard-backup-${new Date().toISOString().split('T')[0]}.json`);
+                element.style.display = 'none';
+                document.body.appendChild(element);
+                element.click();
+                document.body.removeChild(element);
+                showStatus('settingsStatus', 'Settings exported', 'success');
+            } catch (error) {
+                showStatus('settingsStatus', 'Export failed', 'error');
+            }
+        });
+
+        document.getElementById('importBtn').addEventListener('click', () => {
+            document.getElementById('importFile').click();
+        });
+
+        document.getElementById('importFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const json = JSON.parse(text);
+                const base64 = btoa(JSON.stringify(json));
+                const result = await importData(base64);
+                if (result.ok) {
+                    showStatus('settingsStatus', 'Settings imported successfully', 'success');
+                    setTimeout(() => {
+                        hideSettingsModal();
+                        loadAllData();
+                    }, 1000);
+                }
+            } catch (error) {
+                showStatus('settingsStatus', 'Import failed', 'error');
+            }
+        });
+
+        function showStatus(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `status-text ${type}`;
+            element.style.display = 'block';
+        }
+
+        // ============================================================================
+        // Data Loading
+        // ============================================================================
+        async function loadAllData() {
+            try {
+                const [ur, cf, mwp] = await Promise.all([
+                    getUptimeRobot(),
+                    getCloudflare(),
+                    getMainWP(),
+                ]);
+
+                appState.data.uptimeRobot = ur;
+                appState.data.cloudflare = cf;
+                appState.data.mainwp = mwp;
+
+                appState.lastRefreshTime = new Date();
+                updateLastUpdatedTime();
+
+                renderOverview();
+                renderUptime();
+                await renderCloudflare();
+                await renderMainWP();
+                renderDowntimeLog();
+            } catch (error) {
+                console.error('Failed to load data:', error);
+                alert('Failed to load dashboard data. Please check your API keys in Settings.');
+            }
+        }
+
+        function updateLastUpdatedTime() {
+            if (!appState.lastRefreshTime) return;
+            const now = new Date();
+            const diff = Math.floor((now - appState.lastRefreshTime) / 1000);
+            let timeStr;
+
+            if (diff < 60) {
+                timeStr = 'just now';
+            } else if (diff < 3600) {
+                timeStr = `${Math.floor(diff / 60)}m ago`;
+            } else {
+                timeStr = appState.lastRefreshTime.toLocaleTimeString();
+            }
+
+            document.getElementById('lastUpdated').textContent = timeStr;
+        }
+
+        // ============================================================================
+        // Auto Refresh
+        // ============================================================================
+        function startAutoRefresh() {
+            const savedInterval = localStorage.getItem(CONFIG.REFRESH_INTERVAL_KEY);
+            const interval = parseInt(savedInterval) || CONFIG.DEFAULT_REFRESH_INTERVAL;
+
+            document.getElementById('refreshInterval').value = interval;
+
+            clearInterval(appState.autoRefreshTimer);
+            appState.autoRefreshTimer = setInterval(() => {
+                loadAllData();
+                updateLastUpdatedTime();
+            }, interval);
+        }
+
+        document.getElementById('refreshInterval').addEventListener('change', (e) => {
+            const interval = parseInt(e.target.value);
+            localStorage.setItem(CONFIG.REFRESH_INTERVAL_KEY, interval);
+            startAutoRefresh();
+        });
+
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+            loadAllData();
+            updateLastUpdatedTime();
+        });
+
+        // Update time display every minute
+        setInterval(() => {
+            updateLastUpdatedTime();
+        }, 60000);
+
+        // ============================================================================
+        // Tab Navigation
+        // ============================================================================
+        document.querySelectorAll('.tab').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+                switchTab(tabName);
+            });
+        });
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
+
+            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+            document.getElementById(tabName).classList.add('active');
+
+            appState.currentTab = tabName;
+        }
+
+        // ============================================================================
+        // Render: Overview Tab
+        // ============================================================================
+        function renderOverview() {
+            const ur = appState.data.uptimeRobot;
+            if (!ur || !ur.monitors) {
+                document.getElementById('statsRow').innerHTML = '<div class="empty-state"><h3>No data</h3></div>';
+                return;
+            }
+
+            const monitors = ur.monitors || [];
+            const totalMonitors = monitors.length;
+            const upMonitors = monitors.filter((m) => m.status === 2).length;
+            const downMonitors = monitors.filter((m) => m.status === 9).length;
+
+            const logs = ur.logs || [];
+            const responseTimes = logs
+                .filter((l) => l.response_time)
+                .map((l) => l.response_time);
+            const avgResponseTime =
+                responseTimes.length > 0
+                    ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
+                    : 0;
+
+            const responseTimes30d = ur.response_times
+                ? ur.response_times.filter((r) => r.response_time).map((r) => r.response_time)
+                : [];
+            const avgUptime30d =
+                ur.custom_uptime_ratios && ur.custom_uptime_ratios['30d']
+                    ? parseFloat(ur.custom_uptime_ratios['30d']).toFixed(2)
+                    : 'N/A';
+
+            const cfThreats24h = appState.data.cloudflare?.result
+                ? appState.data.cloudflare.result.reduce((sum, zone) => sum + (zone.account_takeover || 0), 0)
+                : 0;
+
+            const statsRow = document.getElementById('statsRow');
+            statsRow.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Total Monitors</div>
+                    <div class="stat-value">${totalMonitors}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Up</div>
+                    <div class="stat-value green">${upMonitors}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Down</div>
+                    <div class="stat-value red">${downMonitors}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Response Time</div>
+                    <div class="stat-value">${avgResponseTime}ms</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Uptime (30d)</div>
+                    <div class="stat-value green">${avgUptime30d}%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">CF Threats (24h)</div>
+                    <div class="stat-value yellow">${cfThreats24h}</div>
+                </div>
+            `;
+
+            // Alert banner
+            const alerts = [];
+            downMonitors > 0 && alerts.push(`${downMonitors} site${downMonitors === 1 ? '' : 's'} down`);
+            const slowSites = monitors.filter((m) => {
+                const lastLog = (ur.logs || []).find((l) => l.monitor_id === m.id);
+                return lastLog && lastLog.response_time > 2000;
+            }).length;
+            slowSites > 0 && alerts.push(`${slowSites} site${slowSites === 1 ? '' : 's'} slow (>2s)`);
+
+            const alertBanner = document.getElementById('alertBanner');
+            if (alerts.length > 0) {
+                document.getElementById('alertItems').innerHTML = alerts
+                    .map((alert) => `<div class="alert-item">⚠️ ${alert}</div>`)
+                    .join('');
+                alertBanner.classList.add('visible');
+            } else {
+                alertBanner.classList.remove('visible');
+            }
+
+            // Sites grid
+            const overviewGrid = document.getElementById('overviewGrid');
+            overviewGrid.innerHTML = monitors
+                .map((monitor) => {
+                    const statusClass = {
+                        2: 'status-ok',
+                        9: 'status-down',
+                        1: 'status-paused',
+                    }[monitor.status] || 'status-ok';
+
+                    const statusDot =
+                        {
+                            2: '<span class="status-dot up"></span>',
+                            9: '<span class="status-dot down"></span>',
+                            1: '<span class="status-dot paused"></span>',
+                        }[monitor.status] || '';
+
+                    const lastLog = (ur.logs || []).find((l) => l.monitor_id === monitor.id);
+                    const responseTime = lastLog ? lastLog.response_time : 0;
+
+                    const lastLogTime = lastLog && lastLog.datetime ? new Date(lastLog.datetime * 1000).toLocaleString() : 'N/A';
+
+                    const uptime30d = ur.custom_uptime_ratios ? Object.entries(ur.custom_uptime_ratios).find(([k]) => k.includes('30d'))?.[1] || 'N/A' : 'N/A';
+
+                    return `
+                        <div class="site-card ${statusClass}">
+                            <div class="site-top">
+                                <div>
+                                    <div class="site-name">${monitor.friendly_name}</div>
+                                    <div class="site-url">${monitor.url}</div>
+                                </div>
+                                ${statusDot}
+                            </div>
+                            <div class="site-metrics">
+                                <div class="metric">
+                                    <span class="metric-label">Response:</span>
+                                    <span class="metric-val">${responseTime}ms</span>
+                                </div>
+                                <div class="metric">
+                                    <span class="metric-label">Uptime (30d):</span>
+                                    <span class="metric-val">${uptime30d}%</span>
+                                </div>
+                            </div>
+                            <div class="rt-bar-wrap">
+                                <div class="rt-bar ${responseTime < 500 ? 'fast' : responseTime < 2000 ? 'medium' : 'slow'}" style="width: ${Math.min(100, (responseTime / 3000) * 100)}%"></div>
+                            </div>
+                        </div>
+                    `;
+                })
+                .join('');
+        }
+
+        // ============================================================================
+        // Render: Uptime Tab
+        // ============================================================================
+        function renderUptime() {
+            const ur = appState.data.uptimeRobot;
+            if (!ur || !ur.monitors) {
+                document.getElementById('uptimeGrid').innerHTML = '<div class="empty-state"><h3>No monitors</h3></div>';
+                return;
+            }
+
+            const uptimeGrid = document.getElementById('uptimeGrid');
+            uptimeGrid.innerHTML = (ur.monitors || [])
+                .map((monitor) => {
+                    const uptime7d = ur.custom_uptime_ratios ? Object.entries(ur.custom_uptime_ratios).find(([k]) => k.includes('7d'))?.[1] || 'N/A' : 'N/A';
+                    const uptime30d = ur.custom_uptime_ratios ? Object.entries(ur.custom_uptime_ratios).find(([k]) => k.includes('30d'))?.[1] || 'N/A' : 'N/A';
+
+                    const lastLog = (ur.logs || []).find((l) => l.monitor_id === monitor.id);
+                    const responseTime = lastLog ? lastLog.response_time : 0;
+
+                    const statusClass = {
+                        2: 'status-ok',
+                        9: 'status-down',
+                        1: 'status-paused',
+                    }[monitor.status] || 'status-ok';
+
+                    const statusDot =
+                        {
+                            2: '<span class="status-dot up"></span>',
+                            9: '<span class="status-dot down"></span>',
+                            1: '<span class="status-dot paused"></span>',
+                        }[monitor.status] || '';
+
+                    return `
+                        <div class="site-card ${statusClass}">
+                            <div class="site-top">
+                                <div>
+                                    <div class="site-name">${monitor.friendly_name}</div>
+                                    <div class="site-url">${monitor.url}</div>
+                                </div>
+                                ${statusDot}
+                            </div>
+                            <div class="site-metrics">
+                                <div class="metric">
+                                    <span class="metric-label">Response:</span>
+                                    <span class="metric-val">${responseTime}ms</span>
+                                </div>
+                                <div class="metric">
+                                    <span class="metric-label">7d Uptime:</span>
+                                    <span class="metric-val">${uptime7d}%</span>
+                                </div>
+                                <div class="metric">
+                                    <span class="metric-label">30d Uptime:</span>
+                                    <span class="metric-val">${uptime30d}%</span>
+                                </div>
+                            </div>
+                            <div class="rt-bar-wrap">
+                                <div class="rt-bar ${responseTime < 500 ? 'fast' : responseTime < 2000 ? 'medium' : 'slow'}" style="width: ${Math.min(100, (responseTime / 3000) * 100)}%"></div>
+                            </div>
+                        </div>
+                    `;
+                })
+                .join('');
+        }
+
+        // ============================================================================
+        // Render: Cloudflare Tab
+        // ============================================================================
+        async function renderCloudflare() {
+            const cf = appState.data.cloudflare;
+            if (!cf || !cf.result) {
+                document.getElementById('cfStatsRow').innerHTML = '';
+                document.getElementById('cfGrid').innerHTML = '<div class="empty-state"><h3>No zones</h3></div>';
+                return;
+            }
+
+            const zones = cf.result || [];
+
+            // Stats
+            const totalRequests = zones.reduce((sum, z) => sum + (z.requests?.all || 0), 0);
+            const totalThreats = zones.reduce((sum, z) => sum + ((z.threats?.all || 0) + (z.account_takeover || 0)), 0);
+            const totalBandwidth = zones.reduce((sum, z) => sum + (z.bandwidth?.all || 0), 0);
+
+            const cfStatsRow = document.getElementById('cfStatsRow');
+            cfStatsRow.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Total Requests (24h)</div>
+                    <div class="stat-value">${totalRequests.toLocaleString()}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Threats</div>
+                    <div class="stat-value red">${totalThreats.toLocaleString()}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Bandwidth</div>
+                    <div class="stat-value">${(totalBandwidth / 1024 / 1024 / 1024).toFixed(2)} GB</div>
+                </div>
+            `;
+
+            // Per-zone cards
+            const cfGrid = document.getElementById('cfGrid');
+            cfGrid.innerHTML = '';
+
+            for (const zone of zones) {
+                const analytics = await getCloudflareAnalytics(zone.account.id);
+                const requests = zone.requests?.all || 0;
+                const cacheRatio = zone.cache || 0;
+                const bandwidth = zone.bandwidth?.all || 0;
+                const threats = (zone.threats?.all || 0) + (zone.account_takeover || 0);
+                const ssl = zone.ssl || 'N/A';
+
+                cfGrid.innerHTML += `
+                    <div class="cf-card">
+                        <h4>${zone.name}</h4>
+                        <div class="cf-stat-row">
+                            <span class="label">Requests (24h)</span>
+                            <span>${requests.toLocaleString()}</span>
+                        </div>
+                        <div class="cf-stat-row">
+                            <span class="label">Cache Ratio</span>
+                            <span>${(cacheRatio * 100).toFixed(1)}%</span>
+                        </div>
+                        <div class="cf-stat-row">
+                            <span class="label">Bandwidth</span>
+                            <span>${(bandwidth / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                        </div>
+                        <div class="cf-stat-row">
+                            <span class="label">Threats</span>
+                            <span>${threats.toLocaleString()}</span>
+                        </div>
+                        <div class="cf-stat-row">
+                            <span class="label">SSL Status</span>
+                            <span>${ssl}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // ============================================================================
+        // Render: MainWP Tab
+        // ============================================================================
+        async function renderMainWP() {
+            const mwp = appState.data.mainwp;
+            if (!mwp || !mwp.result) {
+                document.getElementById('mwpStatsRow').innerHTML = '';
+                document.getElementById('coreUpdatesBody').innerHTML = '<tr><td colspan="4" style="text-align: center;">No data</td></tr>';
+                document.getElementById('pluginUpdatesBody').innerHTML = '<tr><td colspan="3" style="text-align: center;">No data</td></tr>';
+                document.getElementById('mwpSitesGrid').innerHTML = '<div class="empty-state"><h3>No sites</h3></div>';
+                document.getElementById('allMwpSitesGrid').innerHTML = '<div class="empty-state"><h3>No sites</h3></div>';
+                return;
+            }
+
+            const sites = mwp.result || [];
+            const childSiteCount = sites.length;
+
+            // Get updates
+            const updates = appState.data.mainwp?.updates || { result: [] };
+            const updatesList = updates.result || [];
+
+            const wpCoreUpdates = updatesList.filter((u) => u.type === 'wp_core');
+            const pluginUpdates = updatesList.filter((u) => u.type === 'plugin');
+
+            const pendingUpdatesCount = updatesList.length;
+
+            // Stats
+            const mwpStatsRow = document.getElementById('mwpStatsRow');
+            mwpStatsRow.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Child Sites</div>
+                    <div class="stat-value">${childSiteCount}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Pending Updates</div>
+                    <div class="stat-value yellow">${pendingUpdatesCount}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">WP Core Updates</div>
+                    <div class="stat-value">${wpCoreUpdates.length}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Plugin Updates</div>
+                    <div class="stat-value">${pluginUpdates.length}</div>
+                </div>
+            `;
+
+            // WP Core updates table
+            const coreUpdatesBody = document.getElementById('coreUpdatesBody');
+            if (wpCoreUpdates.length > 0) {
+                coreUpdatesBody.innerHTML = wpCoreUpdates
+                    .map(
+                        (u) => `
+                    <tr>
+                        <td>${u.name}</td>
+                        <td>${u.version || 'Unknown'}</td>
+                        <td>${u.new_version || 'Unknown'}</td>
+                        <td><span class="section-badge badge-yellow">Available</span></td>
+                    </tr>
+                `
+                    )
+                    .join('');
+            } else {
+                coreUpdatesBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">All WP core versions up-to-date</td></tr>';
+            }
+
+            // Most common plugin updates
+            const pluginUpdateCounts = {};
+            pluginUpdates.forEach((u) => {
+                pluginUpdateCounts[u.name] = (pluginUpdateCounts[u.name] || 0) + 1;
+            });
+
+            const pluginUpdatesBody = document.getElementById('pluginUpdatesBody');
+            const topPlugins = Object.entries(pluginUpdateCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 10);
+
+            if (topPlugins.length > 0) {
+                pluginUpdatesBody.innerHTML = topPlugins
+                    .map(
+                        ([name, count]) => `
+                    <tr>
+                        <td>${name}</td>
+                        <td>${count}</td>
+                        <td><span class="section-badge badge-yellow">${count > 3 ? 'Multiple' : 'Available'}</span></td>
+                    </tr>
+                `
+                    )
+                    .join('');
+            } else {
+                pluginUpdatesBody.innerHTML = '<tr><td colspan="3" style="text-align: center;">No plugin updates</td></tr>';
+            }
+
+            // Updates by site
+            const siteUpdatesMap = {};
+            updatesList.forEach((u) => {
+                if (!siteUpdatesMap[u.name]) {
+                    siteUpdatesMap[u.name] = [];
+                }
+                siteUpdatesMap[u.name].push(u);
+            });
+
+            const mwpSitesGrid = document.getElementById('mwpSitesGrid');
+            mwpSitesGrid.innerHTML = sites
+                .map((site) => {
+                    const siteUpdates = siteUpdatesMap[site.name] || [];
+                    const coreUpdateCount = siteUpdates.filter((u) => u.type === 'wp_core').length;
+                    const pluginUpdateCount = siteUpdates.filter((u) => u.type === 'plugin').length;
+                    const themeUpdateCount = siteUpdates.filter((u) => u.type === 'theme').length;
+
+                    return `
+                        <div class="site-card">
+                            <div class="site-top">
+                                <div>
+                                    <div class="site-name">${site.name}</div>
+                                    <div class="site-url">${site.url || 'N/A'}</div>
+                                </div>
+                            </div>
+                            <div class="site-metrics">
+                                <div class="metric">
+                                    <span class="metric-label">WP Core:</span>
+                                    <span class="metric-val">${coreUpdateCount}</span>
+                                </div>
+                                <div class="metric">
+                                    <span class="metric-label">Plugins:</span>
+                                    <span class="metric-val">${pluginUpdateCount}</span>
+                                </div>
+                                <div class="metric">
+                                    <span class="metric-label">Themes:</span>
+                                    <span class="metric-val">${themeUpdateCount}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                })
+                .join('');
+
+            // All child sites grid
+            const allMwpSitesGrid = document.getElementById('allMwpSitesGrid');
+            allMwpSitesGrid.innerHTML = sites
+                .map(
+                    (site) => `
+                <div class="site-card">
+                    <div class="site-top">
+                        <div>
+                            <div class="site-name">${site.name}</div>
+                            <div class="site-url">${site.url || 'N/A'}</div>
+                        </div>
+                    </div>
+                    <div class="site-metrics">
+                        <div class="metric">
+                            <span class="metric-label">WP Version:</span>
+                            <span class="metric-val">${site.version || 'Unknown'}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Admin Email:</span>
+                            <span class="metric-val">${site.admin_email || 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+            `
+                )
+                .join('');
+        }
+
+        // ============================================================================
+        // Render: Downtime Log Tab
+        // ============================================================================
+        function renderDowntimeLog() {
+            const ur = appState.data.uptimeRobot;
+            if (!ur || !ur.logs) {
+                document.getElementById('downtimeBody').innerHTML = '<tr><td colspan="5" style="text-align: center;">No downtime events</td></tr>';
+                return;
+            }
+
+            const downtimeLogs = ur.logs
+                .filter((log) => log.type === 1)
+                .sort((a, b) => (b.datetime || 0) - (a.datetime || 0))
+                .slice(0, 50);
+
+            const downtimeBody = document.getElementById('downtimeBody');
+            if (downtimeLogs.length === 0) {
+                downtimeBody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No downtime events</td></tr>';
+            } else {
+                downtimeBody.innerHTML = downtimeLogs
+                    .map((log) => {
+                        const downAt = log.datetime ? new Date(log.datetime * 1000).toLocaleString() : 'Unknown';
+                        const upAt = log.datetime + (log.duration || 0) ? new Date((log.datetime + (log.duration || 0)) * 1000).toLocaleString() : 'Unknown';
+                        const duration = log.duration || 0;
+                        const durationStr = duration < 60 ? `${duration}s` : duration < 3600 ? `${Math.floor(duration / 60)}m` : `${Math.floor(duration / 3600)}h`;
+                        const durationClass = duration > 3600 ? 'dur-long' : 'dur-short';
+
+                        const monitor = ur.monitors ? ur.monitors.find((m) => m.id === log.monitor_id) : null;
+                        const monitorName = monitor?.friendly_name || `Monitor ${log.monitor_id}`;
+
+                        return `
+                            <tr>
+                                <td>${monitorName}</td>
+                                <td>${downAt}</td>
+                                <td>${upAt}</td>
+                                <td><span class="duration-badge ${durationClass}">${durationStr}</span></td>
+                                <td>${log.reason || 'Unknown'}</td>
+                            </tr>
+                        `;
+                    })
+                    .join('');
+            }
+        }
+
+        // ============================================================================
+        // Startup
+        // ============================================================================
+        window.addEventListener('DOMContentLoaded', () => {
+            initApp();
+        });
+    </script>
+</body>
+</html>
