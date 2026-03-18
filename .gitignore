@@ -11,3 +11,6 @@ venv/
 
 # Encrypted config file contains API keys — do NOT commit
 config.enc
+
+# Session file for auto-unlock (contains obfuscated passphrase)
+.session

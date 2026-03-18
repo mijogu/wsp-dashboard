@@ -18,6 +18,7 @@ import requests as http_requests
 from config import (
     save_config, load_config, config_exists,
     export_config, import_config,
+    save_session, load_session, clear_session, session_exists,
 )
 
 PORT = 9111
@@ -78,7 +79,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         path = parsed.path
 
         if path == "/api/status":
-            self._json_response({"unlocked": _passphrase is not None, "hasConfig": config_exists()})
+            self._json_response({
+                "unlocked": _passphrase is not None,
+                "hasConfig": config_exists(),
+                "hasSession": session_exists(),
+            })
         elif path == "/api/uptime-robot":
             self._proxy_uptime_robot()
         elif path == "/api/cloudflare/zones":
@@ -126,6 +131,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def _unlock(self, body):
         global _passphrase
         passphrase = body.get("passphrase", "")
+        remember = body.get("remember", False)
+
         if not passphrase:
             self._json_response({"error": "Passphrase required"}, 400)
             return
@@ -135,6 +142,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 settings = load_config(passphrase)
                 _passphrase = passphrase
                 set_settings(settings)
+                if remember:
+                    save_session(passphrase)
+                    add_log("Auth", "ok", "Session saved — will auto-unlock on next restart")
                 self._json_response({"ok": True, "settings": settings})
             except Exception:
                 self._json_response({"error": "Wrong passphrase"}, 401)
@@ -142,6 +152,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             # First time — set passphrase, empty config
             _passphrase = passphrase
             set_settings({})
+            if remember:
+                save_session(passphrase)
             self._json_response({"ok": True, "settings": {}})
 
     def _get_settings(self):
@@ -425,12 +437,28 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 
 def main():
+    global _passphrase
+
+    # Try auto-unlock from saved session
+    saved_pass = load_session()
+    if saved_pass and config_exists():
+        try:
+            settings = load_config(saved_pass)
+            _passphrase = saved_pass
+            set_settings(settings)
+            add_log("Auth", "ok", "Auto-unlocked from saved session")
+        except Exception:
+            add_log("Auth", "warn", "Saved session invalid — clearing")
+            clear_session()
+
     os.chdir(STATIC_DIR)
     server = HTTPServer(("127.0.0.1", PORT), DashboardHandler)
+    unlocked = "YES (auto-unlocked)" if _passphrase else "no (unlock in browser)"
     print(f"\n  WP Maintenance Dashboard")
     print(f"  ────────────────────────")
     print(f"  Running at: http://localhost:{PORT}")
     print(f"  Config:     {'config.enc found' if config_exists() else 'no config yet (first run)'}")
+    print(f"  Session:    {unlocked}")
     print(f"  Press Ctrl+C to stop\n")
     try:
         server.serve_forever()

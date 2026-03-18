@@ -11,7 +11,9 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.enc")
+_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(_DIR, "config.enc")
+SESSION_PATH = os.path.join(_DIR, ".session")
 SALT_LEN = 16
 NONCE_LEN = 12
 ITERATIONS = 100_000
@@ -81,3 +83,40 @@ def import_config(b64_data: str, passphrase: str) -> dict:
     with open(CONFIG_PATH, "wb") as f:
         f.write(data)
     return settings
+
+
+# ──────────────────────────────────────────────────────────────
+# Session persistence ("remember me")
+# Stores the passphrase in a local dotfile so the server can
+# auto-unlock on restart. The passphrase is obfuscated (not
+# plaintext) but this is convenience, not high security — it
+# lives on your own machine next to the encrypted config.
+# ──────────────────────────────────────────────────────────────
+
+def save_session(passphrase: str):
+    """Save passphrase to .session file (base64-obfuscated)."""
+    encoded = base64.b64encode(passphrase.encode("utf-8")).decode("ascii")
+    with open(SESSION_PATH, "w") as f:
+        f.write(encoded)
+
+
+def load_session() -> str | None:
+    """Load passphrase from .session file, or None if not found."""
+    if not os.path.exists(SESSION_PATH):
+        return None
+    try:
+        with open(SESSION_PATH, "r") as f:
+            encoded = f.read().strip()
+        return base64.b64decode(encoded).decode("utf-8")
+    except Exception:
+        return None
+
+
+def clear_session():
+    """Remove the .session file."""
+    if os.path.exists(SESSION_PATH):
+        os.remove(SESSION_PATH)
+
+
+def session_exists() -> bool:
+    return os.path.exists(SESSION_PATH)

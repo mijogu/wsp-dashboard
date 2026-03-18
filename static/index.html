@@ -455,6 +455,10 @@
             <div class="form-group">
                 <input type="password" id="passphraseInput" placeholder="Passphrase">
             </div>
+            <label id="rememberLabel" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);cursor:pointer;margin-top:4px;">
+                <input type="checkbox" id="rememberMe" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer;">
+                Remember me (auto-unlock on restart)
+            </label>
             <div id="passphraseError" class="status-text error" style="display: none;"></div>
             <div class="modal-actions">
                 <button class="btn btn-primary" id="unlockBtn">Unlock</button>
@@ -565,10 +569,10 @@
             return apiCall('/status');
         }
 
-        async function unlock(passphrase) {
+        async function unlock(passphrase, remember = false) {
             return apiCall('/unlock', {
                 method: 'POST',
-                body: JSON.stringify({ passphrase }),
+                body: JSON.stringify({ passphrase, remember }),
             });
         }
 
@@ -620,14 +624,27 @@
         async function initApp() {
             try {
                 const status = await getStatus();
-                appState.unlocked = false;
                 appState.hasConfig = status.hasConfig;
+
+                if (status.unlocked) {
+                    // Server auto-unlocked from saved session
+                    appState.unlocked = true;
+                    await loadAllData();
+                    startAutoRefresh();
+                    return;
+                }
+
+                appState.unlocked = false;
 
                 if (status.hasConfig) {
                     // Returning user — unlock existing config
                     document.getElementById('passphraseTitle').textContent = 'Dashboard Locked';
                     document.getElementById('passphraseDesc').textContent = 'Enter your passphrase to unlock and view monitoring data.';
                     document.getElementById('unlockBtn').textContent = 'Unlock';
+                    // Pre-check "Remember me" if a session existed before (user opted in previously)
+                    if (status.hasSession) {
+                        document.getElementById('rememberMe').checked = true;
+                    }
                 } else {
                     // First run — set a new passphrase
                     document.getElementById('passphraseTitle').textContent = 'Welcome';
@@ -655,10 +672,11 @@
         document.getElementById('unlockBtn').addEventListener('click', async () => {
             const passphrase = document.getElementById('passphraseInput').value.trim();
             if (!passphrase) return;
+            const remember = document.getElementById('rememberMe').checked;
 
             try {
                 document.getElementById('passphraseError').style.display = 'none';
-                const result = await unlock(passphrase);
+                const result = await unlock(passphrase, remember);
                 if (result.error) {
                     document.getElementById('passphraseError').textContent = result.error;
                     document.getElementById('passphraseError').style.display = 'block';
