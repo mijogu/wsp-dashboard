@@ -1661,52 +1661,12 @@
 
             empty.style.display = 'none';
 
-            // Try to sort by date descending — look for common date field names
-            const dateFields = ['date', 'created', 'updated', 'timestamp', 'time', 'dts', 'dt'];
-            let sortField = null;
-            for (const f of dateFields) {
-                if (records[0][f] !== undefined) { sortField = f; break; }
-            }
-            if (sortField) {
-                records.sort((a, b) => {
-                    const aVal = a[sortField] || '';
-                    const bVal = b[sortField] || '';
-                    // Handle both unix timestamps and ISO strings
-                    const aNum = Number(aVal);
-                    const bNum = Number(bVal);
-                    if (!isNaN(aNum) && !isNaN(bNum)) return bNum - aNum;
-                    return String(bVal).localeCompare(String(aVal));
-                });
-            }
-
-            // Detect field names for name, old version, new version, date
-            const nameFields = ['name', 'title', 'slug', 'plugin', 'theme', 'plugin_name', 'theme_name'];
-            const oldVerFields = ['old_version', 'version_old', 'old', 'previous_version', 'from_version'];
-            const newVerFields = ['new_version', 'version_new', 'new', 'version', 'current_version', 'to_version'];
-
-            function findField(rec, candidates) {
-                for (const f of candidates) {
-                    if (rec[f] !== undefined && rec[f] !== null && rec[f] !== '') return rec[f];
-                }
-                return '—';
-            }
-
-            function formatDate(rec) {
-                if (!sortField || !rec[sortField]) return '—';
-                const val = rec[sortField];
-                const num = Number(val);
-                if (!isNaN(num) && num > 1000000000) {
-                    // Unix timestamp
-                    return new Date(num * 1000).toLocaleDateString('en-US', {
-                        year: 'numeric', month: 'short', day: 'numeric'
-                    });
-                }
-                // Try ISO parse
-                const d = new Date(val);
-                return isNaN(d.getTime()) ? val : d.toLocaleDateString('en-US', {
-                    year: 'numeric', month: 'short', day: 'numeric'
-                });
-            }
+            // Sort by date descending using updated_utime (e.g. "2026-03-17 16:15:35")
+            records.sort((a, b) => {
+                const aVal = a.updated_utime || a.updated_date || '';
+                const bVal = b.updated_utime || b.updated_date || '';
+                return String(bVal).localeCompare(String(aVal));
+            });
 
             const typeColors = {
                 plugins: 'var(--accent)',
@@ -1716,13 +1676,22 @@
 
             tbody.innerHTML = records.map(rec => {
                 const typeColor = typeColors[rec._update_type] || 'var(--text-muted)';
+                const name = rec.name || rec.title || rec.slug || '—';
+                const oldVer = rec.old_version || '—';
+                const newVer = rec.current_version || rec.new_version || '—';
+                // Use the human-readable date + time if available
+                const date = rec.updated_date
+                    ? `${rec.updated_date}${rec.updated_time ? ' ' + rec.updated_time : ''}`
+                    : (rec.updated_utime || '—');
+                const author = rec.updated_author || '';
+
                 return `<tr>
-                    <td>${rec._site_name || '—'}</td>
+                    <td>${escapeHtml(rec._site_name || '—')}</td>
                     <td><span style="color:${typeColor}; font-weight:500; text-transform:capitalize;">${rec._update_type || '—'}</span></td>
-                    <td>${findField(rec, nameFields)}</td>
-                    <td style="color:var(--text-muted);">${findField(rec, oldVerFields)}</td>
-                    <td style="color:var(--green);">${findField(rec, newVerFields)}</td>
-                    <td style="white-space:nowrap;">${formatDate(rec)}</td>
+                    <td>${escapeHtml(name)}</td>
+                    <td style="color:var(--text-muted);">${escapeHtml(oldVer)}</td>
+                    <td style="color:var(--green);">${escapeHtml(newVer)}</td>
+                    <td style="white-space:nowrap;">${escapeHtml(date)}</td>
                 </tr>`;
             }).join('');
         }

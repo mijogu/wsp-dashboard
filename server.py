@@ -434,55 +434,62 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         probe_site = sites[0]
         probe_id = probe_site.get("id")
         probe_name = probe_site.get("name", "Unknown")
-        probe_ep = f"{base_url}/wp-json/mainwp/v2/pro-reports/{probe_id}/plugins"
+        probe_url = probe_site.get("url", "").rstrip("/")
+        # Extract domain from URL (strip protocol)
+        probe_domain = probe_url.replace("https://", "").replace("http://", "").rstrip("/")
+        probe_ep_id = f"{base_url}/wp-json/mainwp/v2/pro-reports/{probe_id}/plugins"
+        probe_ep_domain = f"{base_url}/wp-json/mainwp/v2/pro-reports/{probe_domain}/plugins"
 
         add_log("ProReports", "info",
-                f"Probing {probe_name} (id={probe_id}) to discover request format...")
+                f"Probing {probe_name} (id={probe_id}, domain={probe_domain})...")
 
         winning_method = None
-        # The API requires: start date, end date, AND an "action" param.
-        # Try various parameter name combos with action values.
-        actions = ["updated", "installed", "all"]
-        probe_attempts = []
-        # date_from/date_to + action (most common MainWP Pro Reports pattern)
-        for action in actions:
-            probe_attempts.append((
-                f"GET date_from/to action={action}", "get",
-                {"url": f"{probe_ep}?date_from={date_from}&date_to={date_to}&action={action}",
-                 "headers": json_headers}))
-        # start/end + action
-        for action in actions:
-            probe_attempts.append((
-                f"GET start/end action={action}", "get",
-                {"url": f"{probe_ep}?start={date_from}&end={date_to}&action={action}",
-                 "headers": json_headers}))
-        # startdate/enddate + action
-        probe_attempts.append((
-            "GET startdate/enddate action=updated", "get",
-            {"url": f"{probe_ep}?startdate={date_from}&enddate={date_to}&action=updated",
-             "headers": json_headers}))
-        # date_start/date_end + action
-        probe_attempts.append((
-            "GET date_start/date_end action=updated", "get",
-            {"url": f"{probe_ep}?date_start={date_from}&date_end={date_to}&action=updated",
-             "headers": json_headers}))
-        # from/to + action
-        probe_attempts.append((
-            "GET from/to action=updated", "get",
-            {"url": f"{probe_ep}?from={date_from}&to={date_to}&action=updated",
-             "headers": json_headers}))
-        # Try with ISO date strings instead of unix timestamps
+
+        # Date formats to try
         iso_from = datetime.fromtimestamp(date_from).strftime('%Y-%m-%d')
         iso_to = datetime.fromtimestamp(date_to).strftime('%Y-%m-%d')
-        for action in actions:
+        us_from = datetime.fromtimestamp(date_from).strftime('%m/%d/%Y')
+        us_to = datetime.fromtimestamp(date_to).strftime('%m/%d/%Y')
+
+        # Build a comprehensive set of probes
+        probe_attempts = []
+
+        # For each endpoint variant (by ID and by domain)
+        for ep_label, ep in [("id", probe_ep_id), ("domain", probe_ep_domain)]:
+            # Param name combos × date format combos
+            param_combos = [
+                # (label, start_key, end_key, start_val, end_val)
+                ("unix date_from/to", "date_from", "date_to", date_from, date_to),
+                ("ISO date_from/to", "date_from", "date_to", iso_from, iso_to),
+                ("unix start/end", "start", "end", date_from, date_to),
+                ("ISO start/end", "start", "end", iso_from, iso_to),
+                ("US date_from/to", "date_from", "date_to", us_from, us_to),
+                ("camel dateFrom/To", "dateFrom", "dateTo", iso_from, iso_to),
+                ("camel startDate/endDate", "startDate", "endDate", iso_from, iso_to),
+                ("start_date/end_date", "start_date", "end_date", iso_from, iso_to),
+                ("unix start_date/end_date", "start_date", "end_date", date_from, date_to),
+            ]
+            for plabel, sk, ek, sv, ev in param_combos:
+                probe_attempts.append((
+                    f"{ep_label} {plabel} action=updated", "get",
+                    {"url": f"{ep}?{sk}={sv}&{ek}={ev}&action=updated",
+                     "headers": json_headers}))
+
+        # Also try without the action param but with different date param names
+        # (in case `action` was accepted silently but the date names are the issue)
+        for sk, ek, sv, ev in [
+            ("start_date", "end_date", iso_from, iso_to),
+            ("startDate", "endDate", iso_from, iso_to),
+            ("dateFrom", "dateTo", iso_from, iso_to),
+        ]:
             probe_attempts.append((
-                f"GET ISO date_from/to action={action}", "get",
-                {"url": f"{probe_ep}?date_from={iso_from}&date_to={iso_to}&action={action}",
+                f"id {sk}/{ek} NO action", "get",
+                {"url": f"{probe_ep_id}?{sk}={sv}&{ek}={ev}",
                  "headers": json_headers}))
 
-        # Each probe builds a URL template with {ep} as placeholder
-        # We'll save the winning URL pattern to reuse it
+        # We'll save the winning URL pattern to reuse for all sites
         winning_url_tpl = None
+        uses_domain = False
 
         for method_name, http_method, kwargs in probe_attempts:
             try:
@@ -496,10 +503,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         f"  Probe {method_name}: HTTP {test_resp.status_code} → {body}")
                 if test_resp.status_code == 200:
                     winning_method = method_name
+                    # Figure out if it's id-based or domain-based
+                    uses_domain = method_name.startswith("domain ")
                     # Extract the query string from the winning URL
-                    winning_url_tpl = kwargs["url"].replace(probe_ep, "{ep}")
+                    ref_ep = probe_ep_domain if uses_domain else probe_ep_id
+                    winning_url_tpl = kwargs["url"].replace(ref_ep, "{ep}")
                     add_log("ProReports", "ok",
-                            f"  ✓ '{method_name}' works! Template: {winning_url_tpl}")
+                            f"  ✓ '{method_name}' works! "
+                            f"Uses {'domain' if uses_domain else 'id'}. "
+                            f"Template: {winning_url_tpl}")
                     break
             except Exception as e:
                 add_log("ProReports", "warn", f"  Probe {method_name}: {e}")
@@ -521,9 +533,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         all_records = []
         report_types = ["plugins", "themes", "wordpress"]
 
-        def _fetch_report(site_id, rtype):
+        def _fetch_report(site_identifier, rtype):
             """Make a pro-reports request using the discovered format."""
-            ep = f"{base_url}/wp-json/mainwp/v2/pro-reports/{site_id}/{rtype}"
+            ep = f"{base_url}/wp-json/mainwp/v2/pro-reports/{site_identifier}/{rtype}"
             url = winning_url_tpl.replace("{ep}", ep)
             return http_requests.get(url, headers=json_headers, timeout=30)
 
@@ -532,10 +544,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             site_id = site.get("id")
             site_name = site.get("name", "Unknown")
             site_url = site.get("url", "")
+            # Use domain or id depending on what worked in probing
+            if uses_domain:
+                site_identifier = site_url.replace("https://", "").replace("http://", "").rstrip("/")
+            else:
+                site_identifier = site_id
 
             for rtype in report_types:
                 try:
-                    resp = _fetch_report(site_id, rtype)
+                    resp = _fetch_report(site_identifier, rtype)
                     if resp.status_code != 200:
                         add_log("ProReports", "warn",
                                 f"  {site_name}/{rtype}: HTTP {resp.status_code}")
@@ -543,40 +560,61 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
                     data = resp.json()
 
-                    # Log structure discovery from first site
-                    if first_site:
-                        if isinstance(data, dict):
+                    # Pro Reports structure:
+                    # {success:1, site:{...}, data:{sections_data:[[{...},{...}]]}}
+                    # sections_data is an array of arrays; each inner array
+                    # has dicts with bracket-wrapped keys like [plugin.name]
+                    sections = None
+                    if isinstance(data, dict):
+                        inner = data.get("data")
+                        if isinstance(inner, dict):
+                            sections = inner.get("sections_data")
+
+                    if sections and isinstance(sections, list):
+                        # Flatten: sections_data is [[rec, rec], [rec, rec]]
+                        for section in sections:
+                            if not isinstance(section, list):
+                                continue
+                            for raw_rec in section:
+                                if not isinstance(raw_rec, dict):
+                                    continue
+                                # Clean bracket-wrapped keys:
+                                # "[plugin.name]" → "name"
+                                # "[plugin.old.version]" → "old_version"
+                                rec = {}
+                                for k, v in raw_rec.items():
+                                    clean = k.strip("[]")
+                                    # Remove the type prefix (plugin./theme./wordpress.)
+                                    parts = clean.split(".")
+                                    if len(parts) >= 2:
+                                        # e.g. plugin.name → name
+                                        # plugin.old.version → old_version
+                                        # plugin.updated.date → updated_date
+                                        clean = "_".join(parts[1:])
+                                    rec[clean] = v
+                                rec["_site_id"] = site_id
+                                rec["_site_name"] = site_name
+                                rec["_site_url"] = site_url
+                                rec["_update_type"] = rtype
+                                all_records.append(rec)
+
+                        if first_site:
+                            count = sum(
+                                len(s) for s in sections if isinstance(s, list))
                             add_log("ProReports", "ok",
-                                    f"  {rtype} keys: {list(data.keys())}")
-                            items = (data.get("data") or data.get("result")
-                                     or data.get("records") or data.get("items")
-                                     or data.get(rtype) or [])
-                            if isinstance(items, list) and items and isinstance(items[0], dict):
+                                    f"  {rtype}: {count} entries")
+                            # Log cleaned field names from first record
+                            if all_records:
+                                sample = {k: v for k, v in all_records[-1].items()
+                                          if not k.startswith("_")}
                                 add_log("ProReports", "ok",
-                                        f"  {rtype} record keys: {sorted(items[0].keys())}")
-                        elif isinstance(data, list) and data and isinstance(data[0], dict):
-                            add_log("ProReports", "ok",
-                                    f"  {rtype}: {len(data)} items, keys: {sorted(data[0].keys())}")
-
-                    # Normalize to list
-                    if isinstance(data, list):
-                        records = data
-                    elif isinstance(data, dict):
-                        records = (data.get("data") or data.get("result")
-                                   or data.get("records") or data.get("items")
-                                   or data.get(rtype) or [])
-                        if not isinstance(records, list):
-                            records = [records] if records else []
+                                        f"  {rtype} fields: {sorted(sample.keys())}")
                     else:
-                        records = []
-
-                    for rec in records:
-                        if isinstance(rec, dict):
-                            rec["_site_id"] = site_id
-                            rec["_site_name"] = site_name
-                            rec["_site_url"] = site_url
-                            rec["_update_type"] = rtype
-                            all_records.append(rec)
+                        # Fallback for unexpected structures
+                        if first_site:
+                            add_log("ProReports", "warn",
+                                    f"  {rtype}: no sections_data found, "
+                                    f"keys={list(data.keys()) if isinstance(data, dict) else type(data)}")
 
                 except Exception as e:
                     add_log("ProReports", "warn",
@@ -615,25 +653,34 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if not records:
             return ""
 
-        # Build a stable set of columns: our tags first, then all record fields
-        tag_cols = ["_site_name", "_site_url", "_update_type"]
-        # Gather all unique keys across all records
+        # Preferred column order with friendly headers
+        column_spec = [
+            ("_site_name", "Site"),
+            ("_site_url", "Site URL"),
+            ("_update_type", "Type"),
+            ("name", "Name"),
+            ("old_version", "Old Version"),
+            ("current_version", "New Version"),
+            ("updated_date", "Date"),
+            ("updated_time", "Time"),
+            ("updated_utime", "Timestamp"),
+            ("updated_author", "Author"),
+            ("updated_slug", "Slug"),
+        ]
+
+        # Start with known columns, then add any extras we didn't anticipate
+        known_fields = {c[0] for c in column_spec}
+        skip_fields = {"_site_id"}
         all_keys = set()
         for r in records:
             all_keys.update(r.keys())
-        # Remove tag cols and internal _site_id
-        other_cols = sorted(all_keys - set(tag_cols) - {"_site_id"})
-        fieldnames = tag_cols + other_cols
-        # Rename for CSV headers
-        header_map = {
-            "_site_name": "Site",
-            "_site_url": "URL",
-            "_update_type": "Type",
-        }
+        extra = sorted(all_keys - known_fields - skip_fields)
+
+        fieldnames = [c[0] for c in column_spec if c[0] in all_keys] + extra
+        header_map = {c[0]: c[1] for c in column_spec}
 
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
-        # Write header with friendly names
         writer.writerow({f: header_map.get(f, f) for f in fieldnames})
         for rec in records:
             writer.writerow(rec)
