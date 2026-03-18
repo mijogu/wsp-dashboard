@@ -237,8 +237,76 @@
         .status-text.error { color: var(--red); }
         .status-text.success { color: var(--green); }
 
+        /* Log panel */
+        .log-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            z-index: 150;
+            transition: height 0.2s;
+            display: flex;
+            flex-direction: column;
+        }
+        .log-panel.collapsed { height: 36px; }
+        .log-panel.expanded { height: 280px; }
+        .log-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .log-header-left { display: flex; align-items: center; gap: 10px; }
+        .log-header h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+        .log-count {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 10px;
+            background: var(--surface-2);
+            color: var(--text-muted);
+        }
+        .log-count.has-errors { background: var(--red-bg); color: var(--red); }
+        .log-body {
+            flex: 1;
+            overflow-y: auto;
+            font-family: 'SF Mono', SFMono-Regular, monospace;
+            font-size: 12px;
+            padding: 4px 0;
+        }
+        .log-entry {
+            padding: 2px 16px;
+            display: flex;
+            gap: 10px;
+            align-items: baseline;
+        }
+        .log-entry:hover { background: var(--surface-2); }
+        .log-time { color: var(--text-muted); flex-shrink: 0; width: 60px; }
+        .log-source { flex-shrink: 0; width: 100px; font-weight: 500; }
+        .log-msg { flex: 1; word-break: break-word; }
+        .log-entry.ok .log-source { color: var(--green); }
+        .log-entry.info .log-source { color: var(--accent); }
+        .log-entry.warn .log-source { color: var(--yellow); }
+        .log-entry.error .log-source { color: var(--red); }
+        .log-entry.error .log-msg { color: var(--red); }
+        .log-detail {
+            padding: 1px 16px 4px 186px;
+            font-size: 11px;
+            color: var(--text-muted);
+            word-break: break-all;
+        }
+        .log-toggle { font-size: 11px; color: var(--text-muted); }
+
+        /* Add padding to main container so log panel doesn't cover content */
+        .container { padding-bottom: 300px !important; }
+
         @media (max-width: 768px) {
-            .container { padding: 16px; }
+            .container { padding: 16px; padding-bottom: 300px !important; }
             .sites-grid, .cf-grid { grid-template-columns: 1fr; }
             .stats-row { grid-template-columns: repeat(2, 1fr); }
         }
@@ -1291,11 +1359,85 @@
         }
 
         // ============================================================================
+        // Log Panel
+        // ============================================================================
+        let logPanelExpanded = true;
+        let lastLogCount = 0;
+
+        function toggleLogPanel() {
+            const panel = document.getElementById('logPanel');
+            logPanelExpanded = !logPanelExpanded;
+            panel.className = 'log-panel ' + (logPanelExpanded ? 'expanded' : 'collapsed');
+            document.getElementById('logToggle').textContent = logPanelExpanded ? 'Collapse' : 'Expand';
+        }
+
+        async function fetchLogs() {
+            try {
+                const resp = await fetch('/api/logs');
+                if (!resp.ok) return;
+                const logs = await resp.json();
+                renderLogs(logs);
+            } catch (e) {
+                // silently fail — don't log about failing to fetch logs
+            }
+        }
+
+        function renderLogs(logs) {
+            const body = document.getElementById('logBody');
+            const countEl = document.getElementById('logCount');
+            const hasErrors = logs.some(l => l.level === 'error');
+
+            countEl.textContent = logs.length;
+            countEl.className = 'log-count' + (hasErrors ? ' has-errors' : '');
+
+            let html = '';
+            for (const log of logs) {
+                html += `<div class="log-entry ${log.level}">
+                    <span class="log-time">${log.time}</span>
+                    <span class="log-source">${log.source}</span>
+                    <span class="log-msg">${escapeHtml(log.message)}</span>
+                </div>`;
+                if (log.detail) {
+                    html += `<div class="log-detail">${escapeHtml(log.detail)}</div>`;
+                }
+            }
+            body.innerHTML = html;
+
+            // Auto-scroll to bottom if new entries
+            if (logs.length > lastLogCount) {
+                body.scrollTop = body.scrollHeight;
+            }
+            lastLogCount = logs.length;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // Poll for logs every 2 seconds
+        setInterval(fetchLogs, 2000);
+
+        // ============================================================================
         // Startup
         // ============================================================================
         window.addEventListener('DOMContentLoaded', () => {
             initApp();
+            fetchLogs();
         });
     </script>
+
+    <!-- Log Panel -->
+    <div id="logPanel" class="log-panel expanded">
+        <div class="log-header" onclick="toggleLogPanel()">
+            <div class="log-header-left">
+                <h3>Server Log</h3>
+                <span id="logCount" class="log-count">0</span>
+            </div>
+            <span id="logToggle" class="log-toggle">Collapse</span>
+        </div>
+        <div id="logBody" class="log-body"></div>
+    </div>
 </body>
 </html>

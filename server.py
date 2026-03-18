@@ -27,6 +27,32 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 _settings = {}
 _passphrase = None
 _lock = threading.Lock()
+_logs = []       # recent API call logs
+_logs_lock = threading.Lock()
+MAX_LOGS = 200
+
+
+def add_log(source, level, message, detail=None):
+    """Add a log entry. level: 'info', 'ok', 'warn', 'error'"""
+    import time
+    entry = {
+        "ts": time.time(),
+        "time": time.strftime("%H:%M:%S"),
+        "source": source,
+        "level": level,
+        "message": message,
+    }
+    if detail:
+        entry["detail"] = str(detail)[:500]
+    with _logs_lock:
+        _logs.append(entry)
+        if len(_logs) > MAX_LOGS:
+            _logs[:] = _logs[-MAX_LOGS:]
+    # Also print to server console
+    prefix = {"ok": "+", "info": "~", "warn": "!", "error": "X"}.get(level, "?")
+    sys.stderr.write(f"  [{prefix}] {source}: {message}\n")
+    if detail:
+        sys.stderr.write(f"      {str(detail)[:200]}\n")
 
 
 def get_settings():
@@ -68,6 +94,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._get_settings()
         elif path == "/api/export":
             self._export_config()
+        elif path == "/api/logs":
+            with _logs_lock:
+                self._json_response(list(_logs))
         else:
             # Serve static files; default to index.html
             if path == "/":
@@ -151,11 +180,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         s = get_settings()
         api_key = s.get("urApiKey")
         if not api_key:
+            add_log("Uptime Robot", "warn", "No API key configured")
             self._json_response({"error": "No Uptime Robot API key configured"}, 400)
             return
+        url = "https://api.uptimerobot.com/v2/getMonitors"
+        add_log("Uptime Robot", "info", f"Requesting {url}")
         try:
             resp = http_requests.post(
-                "https://api.uptimerobot.com/v2/getMonitors",
+                url,
                 json={
                     "api_key": api_key,
                     "format": "json",
@@ -168,8 +200,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 },
                 timeout=30,
             )
-            self._json_response(resp.json())
+            data = resp.json()
+            if data.get("stat") == "ok":
+                count = len(data.get("monitors", []))
+                add_log("Uptime Robot", "ok", f"Got {count} monitors (HTTP {resp.status_code})")
+            else:
+                add_log("Uptime Robot", "error", f"API error: {data.get('error', {}).get('message', 'unknown')}", data.get("error"))
+            self._json_response(data)
         except Exception as e:
+            add_log("Uptime Robot", "error", f"Request failed: {e}")
             self._json_response({"error": str(e)}, 502)
 
     # ─── Cloudflare Proxy ─────────────────────────────────────
@@ -177,17 +216,29 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         s = get_settings()
         token = s.get("cfApiToken")
         if not token:
+            add_log("Cloudflare", "warn", "No API token configured")
             self._json_response({"error": "No Cloudflare API token configured"}, 400)
             return
+        url = "https://api.cloudflare.com/client/v4/zones"
+        add_log("Cloudflare", "info", f"Requesting {url}")
         try:
             resp = http_requests.get(
-                "https://api.cloudflare.com/client/v4/zones",
+                url,
                 params={"per_page": 50, "status": "active"},
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=30,
             )
-            self._json_response(resp.json())
+            data = resp.json()
+            if data.get("success"):
+                count = len(data.get("result", []))
+                add_log("Cloudflare", "ok", f"Got {count} zones (HTTP {resp.status_code})")
+            else:
+                errors = data.get("errors", [])
+                msg = errors[0].get("message", "unknown") if errors else "unknown"
+                add_log("Cloudflare", "error", f"API error: {msg}", errors)
+            self._json_response(data)
         except Exception as e:
+            add_log("Cloudflare", "error", f"Request failed: {e}")
             self._json_response({"error": str(e)}, 502)
 
     def _proxy_cf_analytics(self, zone_id):
@@ -216,19 +267,57 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         base_url = s.get("mwpUrl", "").rstrip("/")
         api_key = s.get("mwpApiKey")
         if not base_url or not api_key:
+            missing = []
+            if not base_url: missing.append("URL")
+            if not api_key: missing.append("API key")
+            add_log("MainWP", "warn", f"Not configured — missing: {', '.join(missing)}")
             self._json_response({"error": "MainWP not configured"}, 400)
             return
+        url = f"{base_url}/wp-json/mainwp/v2/sites/basic"
+        add_log("MainWP", "info", f"Requesting {url}")
+        add_log("MainWP", "info", f"Auth: Bearer token ({len(api_key)} chars, starts with '{api_key[:6]}...')")
         try:
             resp = http_requests.get(
-                f"{base_url}/wp-json/mainwp/v2/sites/basic",
+                url,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 timeout=30,
             )
-            self._json_response(resp.json())
+            add_log("MainWP", "info", f"HTTP {resp.status_code} — Content-Type: {resp.headers.get('Content-Type', 'unknown')}")
+            # Log first 300 chars of raw response for debugging
+            raw = resp.text
+            add_log("MainWP", "info", f"Raw response preview: {raw[:300]}")
+            try:
+                data = resp.json()
+            except Exception:
+                add_log("MainWP", "error", f"Response is not valid JSON (HTTP {resp.status_code})", raw[:500])
+                self._json_response({"error": f"MainWP returned non-JSON (HTTP {resp.status_code})"}, 502)
+                return
+            if resp.status_code == 200:
+                if isinstance(data, list):
+                    add_log("MainWP", "ok", f"Got {len(data)} sites")
+                elif isinstance(data, dict) and (data.get("data") or data.get("sites")):
+                    items = data.get("data") or data.get("sites") or []
+                    add_log("MainWP", "ok", f"Got {len(items)} sites (wrapped)")
+                else:
+                    add_log("MainWP", "warn", f"Unexpected 200 response structure: keys={list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+            elif resp.status_code == 401:
+                add_log("MainWP", "error", "401 Unauthorized — API key may be invalid or expired")
+            elif resp.status_code == 403:
+                add_log("MainWP", "error", "403 Forbidden — API key may lack read permissions")
+            else:
+                add_log("MainWP", "error", f"HTTP {resp.status_code}", data)
+            self._json_response(data)
+        except http_requests.exceptions.ConnectionError as e:
+            add_log("MainWP", "error", f"Connection failed — is {base_url} reachable?", str(e))
+            self._json_response({"error": f"Cannot connect to {base_url}: {e}"}, 502)
+        except http_requests.exceptions.Timeout:
+            add_log("MainWP", "error", f"Request timed out after 30s")
+            self._json_response({"error": "MainWP request timed out"}, 502)
         except Exception as e:
+            add_log("MainWP", "error", f"Request failed: {e}")
             self._json_response({"error": str(e)}, 502)
 
     def _proxy_mainwp_updates(self):
@@ -238,17 +327,30 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if not base_url or not api_key:
             self._json_response({"error": "MainWP not configured"}, 400)
             return
+        url = f"{base_url}/wp-json/mainwp/v2/updates"
+        add_log("MainWP", "info", f"Requesting {url}")
         try:
             resp = http_requests.get(
-                f"{base_url}/wp-json/mainwp/v2/updates",
+                url,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 timeout=30,
             )
-            self._json_response(resp.json())
+            try:
+                data = resp.json()
+            except Exception:
+                add_log("MainWP", "error", f"Updates response is not valid JSON (HTTP {resp.status_code})")
+                self._json_response({"error": f"MainWP updates returned non-JSON (HTTP {resp.status_code})"}, 502)
+                return
+            if resp.status_code == 200:
+                add_log("MainWP", "ok", f"Got updates data (keys: {list(data.keys()) if isinstance(data, dict) else 'array'})")
+            else:
+                add_log("MainWP", "error", f"Updates HTTP {resp.status_code}", data)
+            self._json_response(data)
         except Exception as e:
+            add_log("MainWP", "error", f"Updates request failed: {e}")
             self._json_response({"error": str(e)}, 502)
 
     # ─── Helpers ──────────────────────────────────────────────
