@@ -90,6 +90,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._proxy_mainwp_sites()
         elif path == "/api/mainwp/updates":
             self._proxy_mainwp_updates()
+        elif path.startswith("/api/mainwp/raw/"):
+            # Discovery/debug: proxy any MainWP endpoint
+            # e.g. /api/mainwp/raw/sites or /api/mainwp/raw/sites/69
+            mwp_path = path.replace("/api/mainwp/raw/", "")
+            self._proxy_mainwp_raw(mwp_path)
         elif path == "/api/settings":
             self._get_settings()
         elif path == "/api/export":
@@ -273,7 +278,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             add_log("MainWP", "warn", f"Not configured — missing: {', '.join(missing)}")
             self._json_response({"error": "MainWP not configured"}, 400)
             return
-        url = f"{base_url}/wp-json/mainwp/v2/sites/basic"
+        url = f"{base_url}/wp-json/mainwp/v2/sites"
         add_log("MainWP", "info", f"Requesting {url}")
         add_log("MainWP", "info", f"Auth: Bearer token ({len(api_key)} chars, starts with '{api_key[:6]}...')")
         try:
@@ -351,6 +356,46 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._json_response(data)
         except Exception as e:
             add_log("MainWP", "error", f"Updates request failed: {e}")
+            self._json_response({"error": str(e)}, 502)
+
+    # ─── MainWP Raw/Discovery Proxy ─────────────────────────
+    def _proxy_mainwp_raw(self, mwp_path):
+        """Proxy any MainWP v2 endpoint for discovery/debugging."""
+        s = get_settings()
+        base_url = s.get("mwpUrl", "").rstrip("/")
+        api_key = s.get("mwpApiKey")
+        if not base_url or not api_key:
+            self._json_response({"error": "MainWP not configured"}, 400)
+            return
+        url = f"{base_url}/wp-json/mainwp/v2/{mwp_path}"
+        add_log("MainWP", "info", f"Raw request: {url}")
+        try:
+            resp = http_requests.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=30,
+            )
+            add_log("MainWP", "info", f"Raw response: HTTP {resp.status_code}, {len(resp.text)} bytes")
+            # Log field names for discovery
+            try:
+                data = resp.json()
+                if isinstance(data, dict):
+                    add_log("MainWP", "info", f"Response keys: {list(data.keys())}")
+                    # If it has a data array, log first item's keys
+                    items = data.get("data") or data.get("result") or []
+                    if isinstance(items, list) and len(items) > 0 and isinstance(items[0], dict):
+                        add_log("MainWP", "ok", f"First item keys: {sorted(items[0].keys())}")
+                elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                    add_log("MainWP", "ok", f"First item keys: {sorted(data[0].keys())}")
+                self._json_response(data)
+            except Exception:
+                add_log("MainWP", "warn", f"Raw response (not JSON): {resp.text[:300]}")
+                self._json_response({"raw": resp.text[:2000]})
+        except Exception as e:
+            add_log("MainWP", "error", f"Raw request failed: {e}")
             self._json_response({"error": str(e)}, 502)
 
     # ─── Helpers ──────────────────────────────────────────────

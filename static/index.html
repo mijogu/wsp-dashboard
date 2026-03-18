@@ -1329,32 +1329,50 @@
                 </div>`;
             }).join('');
 
-            // All child sites grid
+            // All child sites grid — try many possible field names
             const allMwpSitesGrid = document.getElementById('allMwpSitesGrid');
+
+            // Log first site's keys for debugging field names
+            if (sites.length > 0) {
+                console.log('MainWP site fields:', Object.keys(sites[0]));
+                console.log('First site data:', JSON.stringify(sites[0]).slice(0, 500));
+            }
+
             allMwpSitesGrid.innerHTML = sites
-                .map(
-                    (site) => `
-                <div class="site-card">
-                    <div class="site-top">
-                        <div>
-                            <div class="site-name">${site.name}</div>
-                            <div class="site-url">${site.url || 'N/A'}</div>
+                .map(site => {
+                    const wpVer = site.wp_version || site.wpversion || site.version || site.wordpress_version || null;
+                    const phpVer = site.php_version || site.phpversion || null;
+                    const lastSync = site.last_sync || site.lastsync || site.last_post_gmt || null;
+                    const adminEmail = site.admin_email || site.email || null;
+                    const wpTheme = site.active_theme || site.theme || null;
+                    const sslStatus = site.ssl || site.is_ssl || null;
+
+                    // Build metrics dynamically — only show what we have
+                    let metrics = '';
+                    if (wpVer) metrics += `<div class="metric"><span class="metric-label">WP:</span><span class="metric-val">${wpVer}</span></div>`;
+                    if (phpVer) metrics += `<div class="metric"><span class="metric-label">PHP:</span><span class="metric-val">${phpVer}</span></div>`;
+                    if (wpTheme) metrics += `<div class="metric"><span class="metric-label">Theme:</span><span class="metric-val">${wpTheme}</span></div>`;
+                    if (adminEmail) metrics += `<div class="metric"><span class="metric-label">Email:</span><span class="metric-val">${adminEmail}</span></div>`;
+                    if (lastSync) {
+                        const syncDate = typeof lastSync === 'number' ? new Date(lastSync * 1000).toLocaleDateString() : lastSync;
+                        metrics += `<div class="metric"><span class="metric-label">Last sync:</span><span class="metric-val">${syncDate}</span></div>`;
+                    }
+                    if (!metrics) {
+                        // Show all keys so we can debug
+                        metrics = `<div class="metric"><span class="metric-label">Fields:</span><span class="metric-val" style="font-size:10px;color:var(--text-muted)">${Object.keys(site).join(', ')}</span></div>`;
+                    }
+
+                    return `
+                    <div class="site-card">
+                        <div class="site-top">
+                            <div>
+                                <div class="site-name">${site.name || site.site_name || 'Unknown'}</div>
+                                <div class="site-url">${site.url || site.siteurl || ''}</div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="site-metrics">
-                        <div class="metric">
-                            <span class="metric-label">WP Version:</span>
-                            <span class="metric-val">${site.version || 'Unknown'}</span>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-label">Admin Email:</span>
-                            <span class="metric-val">${site.admin_email || 'N/A'}</span>
-                        </div>
-                    </div>
-                </div>
-            `
-                )
-                .join('');
+                        <div class="site-metrics">${metrics}</div>
+                    </div>`;
+                }).join('');
         }
 
         // ============================================================================
