@@ -6,10 +6,14 @@ Run: python server.py
 Then open: http://localhost:9111
 """
 
+import csv
+import io
 import json
 import os
 import sys
 import threading
+import time
+from datetime import datetime, timedelta
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -95,6 +99,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._proxy_mainwp_sites()
         elif path == "/api/mainwp/updates":
             self._proxy_mainwp_updates()
+        elif path == "/api/mainwp/routes":
+            self._discover_mainwp_routes()
+        elif path == "/api/mainwp/update-history":
+            self._proxy_mainwp_update_history(parsed)
         elif path.startswith("/api/mainwp/raw/"):
             # Discovery/debug: proxy any MainWP endpoint
             # e.g. /api/mainwp/raw/sites or /api/mainwp/raw/sites/69
@@ -371,6 +379,288 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._json_response({"error": str(e)}, 502)
 
     # ─── MainWP Raw/Discovery Proxy ─────────────────────────
+    def _proxy_mainwp_update_history(self, parsed):
+        """
+        Fetch historical update data from Pro Reports for all sites.
+        Query params:
+          ?days=30        — lookback period (default 30)
+          ?format=csv     — return CSV instead of JSON
+          ?site_id=123    — optional: limit to one site
+        """
+        s = get_settings()
+        base_url = s.get("mwpUrl", "").rstrip("/")
+        api_key = s.get("mwpApiKey")
+        if not base_url or not api_key:
+            self._json_response({"error": "MainWP not configured"}, 400)
+            return
+
+        qs = parse_qs(parsed.query)
+        days = int(qs.get("days", ["30"])[0])
+        fmt = qs.get("format", ["json"])[0]
+        filter_site = qs.get("site_id", [None])[0]
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        # Date range for pro-reports (Unix timestamps)
+        date_to = int(time.time())
+        date_from = date_to - (days * 86400)
+        add_log("ProReports", "info",
+                f"Fetching update history: last {days} days "
+                f"({datetime.fromtimestamp(date_from).strftime('%Y-%m-%d')} → "
+                f"{datetime.fromtimestamp(date_to).strftime('%Y-%m-%d')})")
+
+        # Step 1: Get all sites (or just one)
+        try:
+            sites_url = f"{base_url}/wp-json/mainwp/v2/sites"
+            resp = http_requests.get(sites_url, headers=headers, timeout=30)
+            sites_data = resp.json()
+            sites = sites_data.get("data") or sites_data.get("result") or (
+                sites_data if isinstance(sites_data, list) else [])
+            add_log("ProReports", "info", f"Got {len(sites)} sites to query")
+        except Exception as e:
+            add_log("ProReports", "error", f"Failed to get sites: {e}")
+            self._json_response({"error": f"Failed to get sites: {e}"}, 502)
+            return
+
+        if filter_site:
+            sites = [s for s in sites if str(s.get("id")) == str(filter_site)]
+            if not sites:
+                self._json_response({"error": f"Site {filter_site} not found"}, 404)
+                return
+
+        # Step 2: For each site, fetch plugins/themes/wordpress pro-reports
+        all_records = []
+        report_types = ["plugins", "themes", "wordpress"]
+
+        for site in sites:
+            site_id = site.get("id")
+            site_name = site.get("name", "Unknown")
+            site_url = site.get("url", "")
+
+            for rtype in report_types:
+                url = (f"{base_url}/wp-json/mainwp/v2/pro-reports/"
+                       f"{site_id}/{rtype}"
+                       f"?date_from={date_from}&date_to={date_to}")
+                try:
+                    resp = http_requests.get(url, headers=headers, timeout=30)
+                    if resp.status_code != 200:
+                        add_log("ProReports", "warn",
+                                f"  {site_name} / {rtype}: HTTP {resp.status_code}")
+                        continue
+
+                    data = resp.json()
+
+                    # Discover structure from first site
+                    if site == sites[0]:
+                        if isinstance(data, dict):
+                            add_log("ProReports", "ok",
+                                    f"  {rtype} response keys: {list(data.keys())}")
+                            # Check for nested data
+                            items = (data.get("data") or data.get("result")
+                                     or data.get("records") or data.get("items")
+                                     or data.get(rtype) or [])
+                            if isinstance(items, list) and items:
+                                add_log("ProReports", "ok",
+                                        f"  {rtype} first record keys: "
+                                        f"{sorted(items[0].keys()) if isinstance(items[0], dict) else type(items[0])}")
+                            elif not items:
+                                add_log("ProReports", "info",
+                                        f"  {rtype} returned empty list/data")
+                        elif isinstance(data, list):
+                            add_log("ProReports", "ok",
+                                    f"  {rtype}: array of {len(data)} items")
+                            if data and isinstance(data[0], dict):
+                                add_log("ProReports", "ok",
+                                        f"  {rtype} first record keys: "
+                                        f"{sorted(data[0].keys())}")
+
+                    # Normalize to list of records
+                    if isinstance(data, list):
+                        records = data
+                    elif isinstance(data, dict):
+                        records = (data.get("data") or data.get("result")
+                                   or data.get("records") or data.get("items")
+                                   or data.get(rtype) or [])
+                        if not isinstance(records, list):
+                            records = [records] if records else []
+                    else:
+                        records = []
+
+                    # Tag each record with site info and type
+                    for rec in records:
+                        if isinstance(rec, dict):
+                            rec["_site_id"] = site_id
+                            rec["_site_name"] = site_name
+                            rec["_site_url"] = site_url
+                            rec["_update_type"] = rtype
+                            all_records.append(rec)
+
+                except Exception as e:
+                    add_log("ProReports", "warn",
+                            f"  {site_name} / {rtype}: {e}")
+
+            # Brief status per site
+            site_count = sum(1 for r in all_records if r.get("_site_id") == site_id)
+            if site_count:
+                add_log("ProReports", "ok",
+                        f"  {site_name}: {site_count} update records")
+
+        add_log("ProReports", "ok",
+                f"Total: {len(all_records)} update records across {len(sites)} sites")
+
+        # Step 3: Return as JSON or CSV
+        if fmt == "csv" and all_records:
+            output = self._records_to_csv(all_records)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition",
+                             f"attachment; filename=update-history-{days}d.csv")
+            self.end_headers()
+            self.wfile.write(output.encode("utf-8"))
+        else:
+            self._json_response({
+                "days": days,
+                "date_from": datetime.fromtimestamp(date_from).isoformat(),
+                "date_to": datetime.fromtimestamp(date_to).isoformat(),
+                "total_records": len(all_records),
+                "sites_queried": len(sites),
+                "records": all_records,
+            })
+
+    def _records_to_csv(self, records):
+        """Convert update history records to CSV string."""
+        if not records:
+            return ""
+
+        # Build a stable set of columns: our tags first, then all record fields
+        tag_cols = ["_site_name", "_site_url", "_update_type"]
+        # Gather all unique keys across all records
+        all_keys = set()
+        for r in records:
+            all_keys.update(r.keys())
+        # Remove tag cols and internal _site_id
+        other_cols = sorted(all_keys - set(tag_cols) - {"_site_id"})
+        fieldnames = tag_cols + other_cols
+        # Rename for CSV headers
+        header_map = {
+            "_site_name": "Site",
+            "_site_url": "URL",
+            "_update_type": "Type",
+        }
+
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+        # Write header with friendly names
+        writer.writerow({f: header_map.get(f, f) for f in fieldnames})
+        for rec in records:
+            writer.writerow(rec)
+        return buf.getvalue()
+
+    def _discover_mainwp_routes(self):
+        """Discover all registered MainWP REST routes via multiple methods."""
+        s = get_settings()
+        base_url = s.get("mwpUrl", "").rstrip("/")
+        api_key = s.get("mwpApiKey")
+        if not base_url or not api_key:
+            self._json_response({"error": "MainWP not configured"}, 400)
+            return
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        }
+
+        # Try multiple discovery URLs in order of specificity
+        discovery_urls = [
+            (f"{base_url}/wp-json/mainwp/v2", "MainWP v2 namespace"),
+            (f"{base_url}/?rest_route=/mainwp/v2", "MainWP v2 via rest_route"),
+            (f"{base_url}/wp-json", "Full WP REST index"),
+            (f"{base_url}/?rest_route=/", "Full WP REST index via rest_route"),
+        ]
+
+        for url, label in discovery_urls:
+            add_log("MainWP", "info", f"Route discovery ({label}): {url}")
+            try:
+                resp = http_requests.get(url, headers=headers, timeout=30)
+                content_type = resp.headers.get("Content-Type", "")
+                add_log("MainWP", "info",
+                        f"  → HTTP {resp.status_code}, Content-Type: {content_type}, "
+                        f"{len(resp.text)} bytes")
+
+                # Check if we got HTML instead of JSON
+                if "text/html" in content_type or resp.text.strip().startswith("<!"):
+                    add_log("MainWP", "warn",
+                            f"  → Got HTML, not JSON (security plugin or pretty permalinks off?)")
+                    continue
+
+                data = resp.json()
+
+                # If we hit a namespace endpoint, it returns {namespace, routes}
+                routes = data.get("routes", {})
+                if routes:
+                    mwp_routes = {k: v for k, v in routes.items()
+                                  if "mainwp" in k.lower()}
+                    if not mwp_routes:
+                        mwp_routes = routes  # namespace endpoint only has mainwp routes
+                    add_log("MainWP", "ok",
+                            f"Found {len(mwp_routes)} routes via {label}")
+
+                    # Flag interesting ones
+                    report_routes = [r for r in mwp_routes if any(
+                        kw in r.lower() for kw in
+                        ["report", "log", "history", "update", "client"]
+                    )]
+                    if report_routes:
+                        add_log("MainWP", "ok",
+                                f"Potential report routes: {report_routes}")
+
+                    result = {}
+                    for route, info in mwp_routes.items():
+                        methods = set()
+                        for endpoint in info.get("endpoints", []):
+                            methods.update(endpoint.get("methods", []))
+                        result[route] = sorted(methods)
+                    self._json_response({
+                        "source": label,
+                        "routes": result,
+                        "count": len(result),
+                    })
+                    return
+
+                # Maybe the namespace endpoint returned something else useful
+                add_log("MainWP", "info",
+                        f"  → Response keys: {list(data.keys()) if isinstance(data, dict) else 'array'}")
+                if isinstance(data, dict) and "namespace" in data:
+                    add_log("MainWP", "ok",
+                            f"  → Namespace: {data['namespace']}")
+                    self._json_response(data)
+                    return
+
+            except ValueError:
+                add_log("MainWP", "warn", f"  → Response not valid JSON")
+                continue
+            except Exception as e:
+                add_log("MainWP", "warn", f"  → Failed: {e}")
+                continue
+
+        add_log("MainWP", "error",
+                "All discovery methods failed — REST API may be restricted")
+        self._json_response({
+            "error": "Could not discover routes. REST API index may be blocked. "
+                     "Try /api/mainwp/raw/reports and /api/mainwp/raw/client-reports "
+                     "to probe directly.",
+            "try_manually": [
+                "/api/mainwp/raw/reports",
+                "/api/mainwp/raw/client-reports",
+                "/api/mainwp/raw/pro-reports",
+                "/api/mainwp/raw/actions",
+                "/api/mainwp/raw/updates",
+            ],
+        }, 502)
+
     def _proxy_mainwp_raw(self, mwp_path):
         """Proxy any MainWP v2 endpoint for discovery/debugging."""
         s = get_settings()

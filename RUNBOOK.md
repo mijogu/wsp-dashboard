@@ -50,6 +50,9 @@ python3 server.py
 | `/api/mainwp/sites`                   | GET    | Proxy: MainWP child sites          |
 | `/api/mainwp/updates`                 | GET    | Proxy: MainWP pending updates      |
 | `/api/mainwp/raw/{path}`              | GET    | Proxy: any MainWP v2 endpoint      |
+| `/api/mainwp/routes`                  | GET    | Discover all MainWP REST routes    |
+| `/api/mainwp/update-history`          | GET    | Pro Reports update history (JSON)  |
+| `/api/mainwp/update-history?format=csv` | GET  | Pro Reports update history (CSV)   |
 | `/api/logs`                           | GET    | Server log entries                 |
 | `/api/export`                         | GET    | Export encrypted config (base64)   |
 | `/api/import`                         | POST   | Import encrypted config            |
@@ -69,6 +72,7 @@ http://localhost:9111/api/mainwp/raw/updates?type=themes
 http://localhost:9111/api/mainwp/raw/updates?type=wp
 http://localhost:9111/api/mainwp/raw/reports            # Pro Reports (if available)
 http://localhost:9111/api/mainwp/raw/clients
+http://localhost:9111/api/mainwp/routes                 # All registered MainWP REST routes
 ```
 
 ---

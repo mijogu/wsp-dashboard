@@ -341,6 +341,7 @@
             <button class="tab" data-tab="uptime">Uptime</button>
             <button class="tab" data-tab="cloudflare">Cloudflare</button>
             <button class="tab" data-tab="mainwp">MainWP</button>
+            <button class="tab" data-tab="history">Update History</button>
             <button class="tab" data-tab="downtime">Downtime Log</button>
         </div>
 
@@ -426,6 +427,53 @@
                 </div>
                 <div class="sites-grid" id="allMwpSitesGrid"></div>
             </div>
+        </div>
+
+        <!-- Update History Tab -->
+        <div id="history" class="tab-content">
+            <div style="display:flex; align-items:center; gap:16px; margin-bottom:20px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label style="font-size:13px; color:var(--text-muted);">Period:</label>
+                    <select id="historyDays" style="background:var(--surface-2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:13px;">
+                        <option value="7">Last 7 days</option>
+                        <option value="30" selected>Last 30 days</option>
+                        <option value="60">Last 60 days</option>
+                        <option value="90">Last 90 days</option>
+                        <option value="180">Last 6 months</option>
+                        <option value="365">Last year</option>
+                    </select>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label style="font-size:13px; color:var(--text-muted);">Type:</label>
+                    <select id="historyType" style="background:var(--surface-2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:13px;">
+                        <option value="all">All</option>
+                        <option value="plugins">Plugins</option>
+                        <option value="themes">Themes</option>
+                        <option value="wordpress">WordPress</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" id="historyFetchBtn">Fetch History</button>
+                <button class="btn" id="historyExportBtn" style="display:none;">Export CSV</button>
+                <span id="historyStatus" style="font-size:12px; color:var(--text-muted);"></span>
+            </div>
+            <div class="log-table-wrap">
+                <table class="log-table" id="historyTable">
+                    <thead>
+                        <tr>
+                            <th>Site</th>
+                            <th>Type</th>
+                            <th>Name</th>
+                            <th>Old Version</th>
+                            <th>New Version</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody"></tbody>
+                </table>
+            </div>
+            <p id="historyEmpty" style="text-align:center; color:var(--text-muted); padding:40px 0; display:none;">
+                Click "Fetch History" to load update records from MainWP Pro Reports.
+            </p>
         </div>
 
         <!-- Downtime Log Tab -->
@@ -1497,6 +1545,134 @@
 
         // Poll for logs every 2 seconds
         setInterval(fetchLogs, 2000);
+
+        // ============================================================================
+        // Update History Tab
+        // ============================================================================
+        let historyData = [];
+
+        document.getElementById('historyFetchBtn').addEventListener('click', async () => {
+            const days = document.getElementById('historyDays').value;
+            const btn = document.getElementById('historyFetchBtn');
+            const status = document.getElementById('historyStatus');
+
+            btn.disabled = true;
+            btn.textContent = 'Fetching...';
+            status.textContent = 'Querying Pro Reports across all sites...';
+
+            try {
+                const data = await apiCall(`/mainwp/update-history?days=${days}`);
+                historyData = data.records || [];
+                status.textContent = `${data.total_records} records from ${data.sites_queried} sites (${data.date_from.split('T')[0]} → ${data.date_to.split('T')[0]})`;
+                renderHistory();
+
+                if (historyData.length > 0) {
+                    document.getElementById('historyExportBtn').style.display = '';
+                }
+            } catch (e) {
+                status.textContent = `Error: ${e.message}`;
+                console.error('History fetch error:', e);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Fetch History';
+            }
+        });
+
+        document.getElementById('historyExportBtn').addEventListener('click', () => {
+            const days = document.getElementById('historyDays').value;
+            // Trigger CSV download via the server
+            window.open(`/api/mainwp/update-history?days=${days}&format=csv`, '_blank');
+        });
+
+        function renderHistory() {
+            const typeFilter = document.getElementById('historyType').value;
+            const tbody = document.getElementById('historyBody');
+            const empty = document.getElementById('historyEmpty');
+
+            let records = historyData;
+            if (typeFilter !== 'all') {
+                records = records.filter(r => r._update_type === typeFilter);
+            }
+
+            if (!records.length) {
+                tbody.innerHTML = '';
+                empty.style.display = '';
+                empty.textContent = historyData.length
+                    ? 'No records match the selected type filter.'
+                    : 'No update records found for this period. Try a longer time range.';
+                return;
+            }
+
+            empty.style.display = 'none';
+
+            // Try to sort by date descending — look for common date field names
+            const dateFields = ['date', 'created', 'updated', 'timestamp', 'time', 'dts', 'dt'];
+            let sortField = null;
+            for (const f of dateFields) {
+                if (records[0][f] !== undefined) { sortField = f; break; }
+            }
+            if (sortField) {
+                records.sort((a, b) => {
+                    const aVal = a[sortField] || '';
+                    const bVal = b[sortField] || '';
+                    // Handle both unix timestamps and ISO strings
+                    const aNum = Number(aVal);
+                    const bNum = Number(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum)) return bNum - aNum;
+                    return String(bVal).localeCompare(String(aVal));
+                });
+            }
+
+            // Detect field names for name, old version, new version, date
+            const nameFields = ['name', 'title', 'slug', 'plugin', 'theme', 'plugin_name', 'theme_name'];
+            const oldVerFields = ['old_version', 'version_old', 'old', 'previous_version', 'from_version'];
+            const newVerFields = ['new_version', 'version_new', 'new', 'version', 'current_version', 'to_version'];
+
+            function findField(rec, candidates) {
+                for (const f of candidates) {
+                    if (rec[f] !== undefined && rec[f] !== null && rec[f] !== '') return rec[f];
+                }
+                return '—';
+            }
+
+            function formatDate(rec) {
+                if (!sortField || !rec[sortField]) return '—';
+                const val = rec[sortField];
+                const num = Number(val);
+                if (!isNaN(num) && num > 1000000000) {
+                    // Unix timestamp
+                    return new Date(num * 1000).toLocaleDateString('en-US', {
+                        year: 'numeric', month: 'short', day: 'numeric'
+                    });
+                }
+                // Try ISO parse
+                const d = new Date(val);
+                return isNaN(d.getTime()) ? val : d.toLocaleDateString('en-US', {
+                    year: 'numeric', month: 'short', day: 'numeric'
+                });
+            }
+
+            const typeColors = {
+                plugins: 'var(--accent)',
+                themes: 'var(--yellow)',
+                wordpress: 'var(--green)',
+            };
+
+            tbody.innerHTML = records.map(rec => {
+                const typeColor = typeColors[rec._update_type] || 'var(--text-muted)';
+                return `<tr>
+                    <td>${rec._site_name || '—'}</td>
+                    <td><span style="color:${typeColor}; font-weight:500; text-transform:capitalize;">${rec._update_type || '—'}</span></td>
+                    <td>${findField(rec, nameFields)}</td>
+                    <td style="color:var(--text-muted);">${findField(rec, oldVerFields)}</td>
+                    <td style="color:var(--green);">${findField(rec, newVerFields)}</td>
+                    <td style="white-space:nowrap;">${formatDate(rec)}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // Re-render when type filter changes
+        document.getElementById('historyType').addEventListener('change', renderHistory);
 
         // ============================================================================
         // Startup
