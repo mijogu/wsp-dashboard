@@ -288,7 +288,32 @@
         .log-entry:hover { background: var(--surface-2); }
         .log-time { color: var(--text-muted); flex-shrink: 0; width: 60px; }
         .log-source { flex-shrink: 0; width: 100px; font-weight: 500; }
-        .log-msg { flex: 1; word-break: break-word; }
+        .log-msg { flex: 1; word-break: break-word; white-space: pre-wrap; }
+        .log-msg.truncated { cursor: pointer; }
+        .log-msg .expand-hint {
+            color: var(--accent);
+            font-size: 11px;
+            margin-left: 4px;
+            opacity: 0.8;
+        }
+        .log-msg.truncated:hover .expand-hint { opacity: 1; text-decoration: underline; }
+        .log-msg .full-text { display: none; }
+        .log-msg.expanded .short-text { display: none; }
+        .log-msg.expanded .full-text {
+            display: block;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 6px 8px;
+            margin-top: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+        .log-msg.expanded .expand-hint { display: none; }
         .log-entry.ok .log-source { color: var(--green); }
         .log-entry.info .log-source { color: var(--accent); }
         .log-entry.warn .log-source { color: var(--yellow); }
@@ -1509,6 +1534,8 @@
             }
         }
 
+        const LOG_TRUNCATE_LEN = 150;
+
         function renderLogs(logs) {
             const body = document.getElementById('logBody');
             const countEl = document.getElementById('logCount');
@@ -1518,11 +1545,40 @@
             countEl.className = 'log-count' + (hasErrors ? ' has-errors' : '');
 
             let html = '';
-            for (const log of logs) {
+            for (let i = 0; i < logs.length; i++) {
+                const log = logs[i];
+                const msg = log.message || '';
+                const isLong = msg.length > LOG_TRUNCATE_LEN;
+
+                let msgHtml;
+                if (isLong) {
+                    const short = escapeHtml(msg.slice(0, LOG_TRUNCATE_LEN)) + '…';
+                    const full = escapeHtml(msg);
+                    // Try to pretty-print JSON
+                    let prettyFull = full;
+                    try {
+                        const jsonStart = msg.indexOf('{');
+                        const jsonEnd = msg.lastIndexOf('}');
+                        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                            const prefix = escapeHtml(msg.slice(0, jsonStart));
+                            const jsonStr = msg.slice(jsonStart, jsonEnd + 1);
+                            const parsed = JSON.parse(jsonStr);
+                            prettyFull = prefix + escapeHtml(JSON.stringify(parsed, null, 2));
+                        }
+                    } catch(e) { /* not JSON, use raw */ }
+
+                    msgHtml = `<span class="log-msg truncated" data-idx="${i}" onclick="this.classList.toggle('expanded')">
+                        <span class="short-text">${short}<span class="expand-hint">[expand]</span></span>
+                        <span class="full-text">${prettyFull}</span>
+                    </span>`;
+                } else {
+                    msgHtml = `<span class="log-msg">${escapeHtml(msg)}</span>`;
+                }
+
                 html += `<div class="log-entry ${log.level}">
                     <span class="log-time">${log.time}</span>
                     <span class="log-source">${log.source}</span>
-                    <span class="log-msg">${escapeHtml(log.message)}</span>
+                    ${msgHtml}
                 </div>`;
                 if (log.detail) {
                     html += `<div class="log-detail">${escapeHtml(log.detail)}</div>`;

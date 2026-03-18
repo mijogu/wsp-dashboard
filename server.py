@@ -15,6 +15,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 import requests as http_requests
@@ -399,12 +400,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         fmt = qs.get("format", ["json"])[0]
         filter_site = qs.get("site_id", [None])[0]
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        auth_headers = {"Authorization": f"Bearer {api_key}"}
+        json_headers = {**auth_headers, "Content-Type": "application/json"}
 
-        # Date range for pro-reports (Unix timestamps)
+        # Date range
         date_to = int(time.time())
         date_from = date_to - (days * 86400)
         add_log("ProReports", "info",
@@ -412,10 +411,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 f"({datetime.fromtimestamp(date_from).strftime('%Y-%m-%d')} → "
                 f"{datetime.fromtimestamp(date_to).strftime('%Y-%m-%d')})")
 
-        # Step 1: Get all sites (or just one)
+        # Step 1: Get all sites
         try:
             sites_url = f"{base_url}/wp-json/mainwp/v2/sites"
-            resp = http_requests.get(sites_url, headers=headers, timeout=30)
+            resp = http_requests.get(sites_url, headers=json_headers, timeout=30)
             sites_data = resp.json()
             sites = sites_data.get("data") or sites_data.get("result") or (
                 sites_data if isinstance(sites_data, list) else [])
@@ -426,58 +425,140 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
         if filter_site:
-            sites = [s for s in sites if str(s.get("id")) == str(filter_site)]
+            sites = [st for st in sites if str(st.get("id")) == str(filter_site)]
             if not sites:
                 self._json_response({"error": f"Site {filter_site} not found"}, 404)
                 return
 
-        # Step 2: For each site, fetch plugins/themes/wordpress pro-reports
+        # Step 2: Probe the first site to discover the correct request format
+        probe_site = sites[0]
+        probe_id = probe_site.get("id")
+        probe_name = probe_site.get("name", "Unknown")
+        probe_ep = f"{base_url}/wp-json/mainwp/v2/pro-reports/{probe_id}/plugins"
+
+        add_log("ProReports", "info",
+                f"Probing {probe_name} (id={probe_id}) to discover request format...")
+
+        winning_method = None
+        # The API requires: start date, end date, AND an "action" param.
+        # Try various parameter name combos with action values.
+        actions = ["updated", "installed", "all"]
+        probe_attempts = []
+        # date_from/date_to + action (most common MainWP Pro Reports pattern)
+        for action in actions:
+            probe_attempts.append((
+                f"GET date_from/to action={action}", "get",
+                {"url": f"{probe_ep}?date_from={date_from}&date_to={date_to}&action={action}",
+                 "headers": json_headers}))
+        # start/end + action
+        for action in actions:
+            probe_attempts.append((
+                f"GET start/end action={action}", "get",
+                {"url": f"{probe_ep}?start={date_from}&end={date_to}&action={action}",
+                 "headers": json_headers}))
+        # startdate/enddate + action
+        probe_attempts.append((
+            "GET startdate/enddate action=updated", "get",
+            {"url": f"{probe_ep}?startdate={date_from}&enddate={date_to}&action=updated",
+             "headers": json_headers}))
+        # date_start/date_end + action
+        probe_attempts.append((
+            "GET date_start/date_end action=updated", "get",
+            {"url": f"{probe_ep}?date_start={date_from}&date_end={date_to}&action=updated",
+             "headers": json_headers}))
+        # from/to + action
+        probe_attempts.append((
+            "GET from/to action=updated", "get",
+            {"url": f"{probe_ep}?from={date_from}&to={date_to}&action=updated",
+             "headers": json_headers}))
+        # Try with ISO date strings instead of unix timestamps
+        iso_from = datetime.fromtimestamp(date_from).strftime('%Y-%m-%d')
+        iso_to = datetime.fromtimestamp(date_to).strftime('%Y-%m-%d')
+        for action in actions:
+            probe_attempts.append((
+                f"GET ISO date_from/to action={action}", "get",
+                {"url": f"{probe_ep}?date_from={iso_from}&date_to={iso_to}&action={action}",
+                 "headers": json_headers}))
+
+        # Each probe builds a URL template with {ep} as placeholder
+        # We'll save the winning URL pattern to reuse it
+        winning_url_tpl = None
+
+        for method_name, http_method, kwargs in probe_attempts:
+            try:
+                kwargs["timeout"] = 30
+                if http_method == "get":
+                    test_resp = http_requests.get(**kwargs)
+                else:
+                    test_resp = http_requests.post(**kwargs)
+                body = test_resp.text[:500]
+                add_log("ProReports", "info",
+                        f"  Probe {method_name}: HTTP {test_resp.status_code} → {body}")
+                if test_resp.status_code == 200:
+                    winning_method = method_name
+                    # Extract the query string from the winning URL
+                    winning_url_tpl = kwargs["url"].replace(probe_ep, "{ep}")
+                    add_log("ProReports", "ok",
+                            f"  ✓ '{method_name}' works! Template: {winning_url_tpl}")
+                    break
+            except Exception as e:
+                add_log("ProReports", "warn", f"  Probe {method_name}: {e}")
+
+        if not winning_method:
+            add_log("ProReports", "error",
+                    "All request methods returned errors — see probe responses above.")
+            self._json_response({
+                "days": days,
+                "error": "Pro Reports endpoints rejected all request formats. "
+                         "Check the server logs for the raw error responses.",
+                "total_records": 0,
+                "sites_queried": len(sites),
+                "records": [],
+            })
+            return
+
+        # Step 3: Fetch data from all sites using the winning URL template
         all_records = []
         report_types = ["plugins", "themes", "wordpress"]
 
+        def _fetch_report(site_id, rtype):
+            """Make a pro-reports request using the discovered format."""
+            ep = f"{base_url}/wp-json/mainwp/v2/pro-reports/{site_id}/{rtype}"
+            url = winning_url_tpl.replace("{ep}", ep)
+            return http_requests.get(url, headers=json_headers, timeout=30)
+
+        first_site = True
         for site in sites:
             site_id = site.get("id")
             site_name = site.get("name", "Unknown")
             site_url = site.get("url", "")
 
             for rtype in report_types:
-                url = (f"{base_url}/wp-json/mainwp/v2/pro-reports/"
-                       f"{site_id}/{rtype}"
-                       f"?date_from={date_from}&date_to={date_to}")
                 try:
-                    resp = http_requests.get(url, headers=headers, timeout=30)
+                    resp = _fetch_report(site_id, rtype)
                     if resp.status_code != 200:
                         add_log("ProReports", "warn",
-                                f"  {site_name} / {rtype}: HTTP {resp.status_code}")
+                                f"  {site_name}/{rtype}: HTTP {resp.status_code}")
                         continue
 
                     data = resp.json()
 
-                    # Discover structure from first site
-                    if site == sites[0]:
+                    # Log structure discovery from first site
+                    if first_site:
                         if isinstance(data, dict):
                             add_log("ProReports", "ok",
-                                    f"  {rtype} response keys: {list(data.keys())}")
-                            # Check for nested data
+                                    f"  {rtype} keys: {list(data.keys())}")
                             items = (data.get("data") or data.get("result")
                                      or data.get("records") or data.get("items")
                                      or data.get(rtype) or [])
-                            if isinstance(items, list) and items:
+                            if isinstance(items, list) and items and isinstance(items[0], dict):
                                 add_log("ProReports", "ok",
-                                        f"  {rtype} first record keys: "
-                                        f"{sorted(items[0].keys()) if isinstance(items[0], dict) else type(items[0])}")
-                            elif not items:
-                                add_log("ProReports", "info",
-                                        f"  {rtype} returned empty list/data")
-                        elif isinstance(data, list):
+                                        f"  {rtype} record keys: {sorted(items[0].keys())}")
+                        elif isinstance(data, list) and data and isinstance(data[0], dict):
                             add_log("ProReports", "ok",
-                                    f"  {rtype}: array of {len(data)} items")
-                            if data and isinstance(data[0], dict):
-                                add_log("ProReports", "ok",
-                                        f"  {rtype} first record keys: "
-                                        f"{sorted(data[0].keys())}")
+                                    f"  {rtype}: {len(data)} items, keys: {sorted(data[0].keys())}")
 
-                    # Normalize to list of records
+                    # Normalize to list
                     if isinstance(data, list):
                         records = data
                     elif isinstance(data, dict):
@@ -489,7 +570,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     else:
                         records = []
 
-                    # Tag each record with site info and type
                     for rec in records:
                         if isinstance(rec, dict):
                             rec["_site_id"] = site_id
@@ -500,18 +580,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
                 except Exception as e:
                     add_log("ProReports", "warn",
-                            f"  {site_name} / {rtype}: {e}")
+                            f"  {site_name}/{rtype}: {e}")
 
-            # Brief status per site
+            first_site = False
             site_count = sum(1 for r in all_records if r.get("_site_id") == site_id)
             if site_count:
                 add_log("ProReports", "ok",
                         f"  {site_name}: {site_count} update records")
 
         add_log("ProReports", "ok",
-                f"Total: {len(all_records)} update records across {len(sites)} sites")
+                f"Total: {len(all_records)} records across {len(sites)} sites")
 
-        # Step 3: Return as JSON or CSV
+        # Step 4: Return JSON or CSV
         if fmt == "csv" and all_records:
             output = self._records_to_csv(all_records)
             self.send_response(200)
@@ -742,7 +822,11 @@ def main():
             clear_session()
 
     os.chdir(STATIC_DIR)
-    server = HTTPServer(("127.0.0.1", PORT), DashboardHandler)
+
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+    server = ThreadedHTTPServer(("127.0.0.1", PORT), DashboardHandler)
     unlocked = "YES (auto-unlocked)" if _passphrase else "no (unlock in browser)"
     print(f"\n  WP Maintenance Dashboard")
     print(f"  ────────────────────────")
