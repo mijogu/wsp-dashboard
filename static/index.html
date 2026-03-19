@@ -1668,30 +1668,10 @@
         }
 
         // ── Log polling with mousedown-pause / mouseup-resume (5s delay) ────────
+        // NOTE: element lookups happen inside DOMContentLoaded (see Startup block)
+        // because #logBody lives below the <script> tag in the DOM.
         let _logPaused = false;
         let _logResumeTimer = null;
-
-        const _logBody = document.getElementById('logBody');
-        const _logPausedBadge = document.getElementById('logPausedBadge');
-
-        _logBody.addEventListener('mousedown', () => {
-            _logPaused = true;
-            if (_logResumeTimer) { clearTimeout(_logResumeTimer); _logResumeTimer = null; }
-            _logPausedBadge.style.display = '';
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (!_logPaused) return;
-            if (_logResumeTimer) clearTimeout(_logResumeTimer);
-            _logResumeTimer = setTimeout(() => {
-                _logPaused = false;
-                _logResumeTimer = null;
-                _logPausedBadge.style.display = 'none';
-                fetchLogs(); // immediate refresh on resume
-            }, 5000);
-        });
-
-        setInterval(() => { if (!_logPaused) fetchLogs(); }, 2000);
 
         // ============================================================================
         // Update History Tab
@@ -2045,6 +2025,29 @@
         // Startup
         // ============================================================================
         window.addEventListener('DOMContentLoaded', () => {
+            // Wire up log pause/resume now that the DOM is fully parsed
+            const _logBody = document.getElementById('logBody');
+            const _logPausedBadge = document.getElementById('logPausedBadge');
+
+            _logBody.addEventListener('mousedown', () => {
+                _logPaused = true;
+                if (_logResumeTimer) { clearTimeout(_logResumeTimer); _logResumeTimer = null; }
+                _logPausedBadge.style.display = '';
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (!_logPaused) return;
+                if (_logResumeTimer) clearTimeout(_logResumeTimer);
+                _logResumeTimer = setTimeout(() => {
+                    _logPaused = false;
+                    _logResumeTimer = null;
+                    _logPausedBadge.style.display = 'none';
+                    fetchLogs();
+                }, 5000);
+            });
+
+            setInterval(() => { if (!_logPaused) fetchLogs(); }, 2000);
+
             initApp();
             fetchLogs();
         });
