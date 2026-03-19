@@ -40,6 +40,12 @@ _passphrase = None
 _lock = threading.Lock()
 _logs = []       # recent API call logs
 _logs_lock = threading.Lock()
+
+# Cached Pro Reports probe result — avoids re-probing on every sync.
+# Stores {"url_tpl": "...", "uses_domain": bool} once a working format is found.
+# Resets to None on server restart; will re-probe once if the format ever breaks.
+_probe_cache = None
+_probe_lock = threading.Lock()
 MAX_LOGS = 200
 
 
@@ -483,103 +489,131 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return
 
         # Step 2: Probe the first site to discover the correct request format
-        probe_site = sites[0]
-        probe_id = probe_site.get("id")
-        probe_name = probe_site.get("name", "Unknown")
-        probe_url = probe_site.get("url", "").rstrip("/")
-        # Extract domain from URL (strip protocol)
-        probe_domain = probe_url.replace("https://", "").replace("http://", "").rstrip("/")
-        probe_ep_id = f"{base_url}/wp-json/mainwp/v2/pro-reports/{probe_id}/plugins"
-        probe_ep_domain = f"{base_url}/wp-json/mainwp/v2/pro-reports/{probe_domain}/plugins"
+        # Step 2: Resolve the winning URL template (probe only when needed)
+        global _probe_cache, _probe_lock
 
-        add_log("ProReports", "info",
-                f"Probing {probe_name} (id={probe_id}, domain={probe_domain})...")
-
-        winning_method = None
-
-        # Date formats to try
-        iso_from = start_date_str
-        iso_to   = end_date_str
-        us_from = dt_from.strftime('%m/%d/%Y')
-        us_to   = dt_to.strftime('%m/%d/%Y')
-
-        # Build a comprehensive set of probes
-        probe_attempts = []
-
-        # For each endpoint variant (by ID and by domain)
-        for ep_label, ep in [("id", probe_ep_id), ("domain", probe_ep_domain)]:
-            # Param name combos × date format combos
-            param_combos = [
-                # (label, start_key, end_key, start_val, end_val)
-                ("unix date_from/to", "date_from", "date_to", date_from, date_to),
-                ("ISO date_from/to", "date_from", "date_to", iso_from, iso_to),
-                ("unix start/end", "start", "end", date_from, date_to),
-                ("ISO start/end", "start", "end", iso_from, iso_to),
-                ("US date_from/to", "date_from", "date_to", us_from, us_to),
-                ("camel dateFrom/To", "dateFrom", "dateTo", iso_from, iso_to),
-                ("camel startDate/endDate", "startDate", "endDate", iso_from, iso_to),
-                ("start_date/end_date", "start_date", "end_date", iso_from, iso_to),
-                ("unix start_date/end_date", "start_date", "end_date", date_from, date_to),
-            ]
-            for plabel, sk, ek, sv, ev in param_combos:
-                probe_attempts.append((
-                    f"{ep_label} {plabel} action=updated", "get",
-                    {"url": f"{ep}?{sk}={sv}&{ek}={ev}&action=updated",
-                     "headers": json_headers}))
-
-        # Also try without the action param but with different date param names
-        # (in case `action` was accepted silently but the date names are the issue)
-        for sk, ek, sv, ev in [
-            ("start_date", "end_date", iso_from, iso_to),
-            ("startDate", "endDate", iso_from, iso_to),
-            ("dateFrom", "dateTo", iso_from, iso_to),
-        ]:
-            probe_attempts.append((
-                f"id {sk}/{ek} NO action", "get",
-                {"url": f"{probe_ep_id}?{sk}={sv}&{ek}={ev}",
-                 "headers": json_headers}))
-
-        # We'll save the winning URL pattern to reuse for all sites
         winning_url_tpl = None
         uses_domain = False
 
-        for method_name, http_method, kwargs in probe_attempts:
-            try:
-                kwargs["timeout"] = 30
-                if http_method == "get":
-                    test_resp = http_requests.get(**kwargs)
-                else:
-                    test_resp = http_requests.post(**kwargs)
-                body = test_resp.text[:500]
-                add_log("ProReports", "info",
-                        f"  Probe {method_name}: HTTP {test_resp.status_code} → {body}")
-                if test_resp.status_code == 200:
-                    winning_method = method_name
-                    # Figure out if it's id-based or domain-based
-                    uses_domain = method_name.startswith("domain ")
-                    # Extract the query string from the winning URL
-                    ref_ep = probe_ep_domain if uses_domain else probe_ep_id
-                    winning_url_tpl = kwargs["url"].replace(ref_ep, "{ep}")
-                    add_log("ProReports", "ok",
-                            f"  ✓ '{method_name}' works! "
-                            f"Uses {'domain' if uses_domain else 'id'}. "
-                            f"Template: {winning_url_tpl}")
-                    break
-            except Exception as e:
-                add_log("ProReports", "warn", f"  Probe {method_name}: {e}")
+        with _probe_lock:
+            if _probe_cache is not None:
+                # Verify the cached template still works with a quick test request
+                probe_site = sites[0]
+                probe_id = probe_site.get("id")
+                probe_url_raw = probe_site.get("url", "").rstrip("/")
+                probe_domain = probe_url_raw.replace("https://", "").replace("http://", "").rstrip("/")
+                cached_uses_domain = _probe_cache["uses_domain"]
+                cached_tpl = _probe_cache["url_tpl"]
+                test_identifier = probe_domain if cached_uses_domain else probe_id
+                test_ep = f"{base_url}/wp-json/mainwp/v2/pro-reports/{test_identifier}/plugins"
+                # Substitute current dates into the cached template
+                test_url = (cached_tpl
+                            .replace("{ep}", test_ep)
+                            .replace(_probe_cache["sample_start"], start_date_str)
+                            .replace(_probe_cache["sample_end"],   end_date_str))
+                try:
+                    verify_resp = http_requests.get(test_url, headers=json_headers, timeout=15)
+                    if verify_resp.status_code == 200:
+                        winning_url_tpl = cached_tpl
+                        uses_domain = cached_uses_domain
+                        add_log("ProReports", "info",
+                                f"Using cached request format "
+                                f"({'domain' if uses_domain else 'id'}-based)")
+                    else:
+                        add_log("ProReports", "warn",
+                                f"Cached format returned HTTP {verify_resp.status_code} — re-probing")
+                        _probe_cache = None
+                except Exception as e:
+                    add_log("ProReports", "warn", f"Cached format check failed: {e} — re-probing")
+                    _probe_cache = None
 
-        if not winning_method:
-            add_log("ProReports", "error",
-                    "All request methods returned errors — see probe responses above.")
-            self._json_response({
-                "days": days,
-                "error": "Pro Reports endpoints rejected all request formats. "
-                         "Check the server logs for the raw error responses.",
-                "total_records": 0,
-                "sites_queried": len(sites),
-                "records": [],
-            })
-            return
+            if winning_url_tpl is None:
+                # Full probe — try all request format combinations
+                probe_site = sites[0]
+                probe_id = probe_site.get("id")
+                probe_name = probe_site.get("name", "Unknown")
+                probe_url_raw = probe_site.get("url", "").rstrip("/")
+                probe_domain = probe_url_raw.replace("https://", "").replace("http://", "").rstrip("/")
+                probe_ep_id     = f"{base_url}/wp-json/mainwp/v2/pro-reports/{probe_id}/plugins"
+                probe_ep_domain = f"{base_url}/wp-json/mainwp/v2/pro-reports/{probe_domain}/plugins"
+
+                add_log("ProReports", "info",
+                        f"Probing {probe_name} (id={probe_id}, domain={probe_domain})...")
+
+                iso_from = start_date_str
+                iso_to   = end_date_str
+                us_from  = dt_from.strftime('%m/%d/%Y')
+                us_to    = dt_to.strftime('%m/%d/%Y')
+
+                probe_attempts = []
+                for ep_label, ep in [("id", probe_ep_id), ("domain", probe_ep_domain)]:
+                    param_combos = [
+                        ("unix date_from/to",      "date_from",  "date_to",  date_from, date_to),
+                        ("ISO date_from/to",        "date_from",  "date_to",  iso_from,  iso_to),
+                        ("unix start/end",          "start",      "end",      date_from, date_to),
+                        ("ISO start/end",           "start",      "end",      iso_from,  iso_to),
+                        ("US date_from/to",         "date_from",  "date_to",  us_from,   us_to),
+                        ("camel dateFrom/To",       "dateFrom",   "dateTo",   iso_from,  iso_to),
+                        ("camel startDate/endDate", "startDate",  "endDate",  iso_from,  iso_to),
+                        ("start_date/end_date",     "start_date", "end_date", iso_from,  iso_to),
+                        ("unix start_date/end_date","start_date", "end_date", date_from, date_to),
+                    ]
+                    for plabel, sk, ek, sv, ev in param_combos:
+                        probe_attempts.append((
+                            f"{ep_label} {plabel} action=updated", "get",
+                            {"url": f"{ep}?{sk}={sv}&{ek}={ev}&action=updated",
+                             "headers": json_headers}))
+
+                for sk, ek, sv, ev in [
+                    ("start_date", "end_date", iso_from, iso_to),
+                    ("startDate",  "endDate",  iso_from, iso_to),
+                    ("dateFrom",   "dateTo",   iso_from, iso_to),
+                ]:
+                    probe_attempts.append((
+                        f"id {sk}/{ek} NO action", "get",
+                        {"url": f"{probe_ep_id}?{sk}={sv}&{ek}={ev}",
+                         "headers": json_headers}))
+
+                winning_method = None
+                for method_name, http_method, kwargs in probe_attempts:
+                    try:
+                        kwargs["timeout"] = 30
+                        test_resp = http_requests.get(**kwargs)
+                        body = test_resp.text[:500]
+                        add_log("ProReports", "info",
+                                f"  Probe {method_name}: HTTP {test_resp.status_code} → {body}")
+                        if test_resp.status_code == 200:
+                            winning_method = method_name
+                            uses_domain = method_name.startswith("domain ")
+                            ref_ep = probe_ep_domain if uses_domain else probe_ep_id
+                            winning_url_tpl = kwargs["url"].replace(ref_ep, "{ep}")
+                            # Store in cache for future syncs
+                            _probe_cache = {
+                                "url_tpl":     winning_url_tpl,
+                                "uses_domain": uses_domain,
+                                "sample_start": start_date_str,
+                                "sample_end":   end_date_str,
+                            }
+                            add_log("ProReports", "ok",
+                                    f"  ✓ '{method_name}' works! "
+                                    f"Uses {'domain' if uses_domain else 'id'}. "
+                                    f"Template: {winning_url_tpl} (cached for future syncs)")
+                            break
+                    except Exception as e:
+                        add_log("ProReports", "warn", f"  Probe {method_name}: {e}")
+
+                if not winning_method:
+                    add_log("ProReports", "error",
+                            "All request methods returned errors — see probe responses above.")
+                    self._json_response({
+                        "days": days,
+                        "error": "Pro Reports endpoints rejected all request formats. "
+                                 "Check the server logs for the raw error responses.",
+                        "total_records": 0,
+                        "sites_queried": len(sites),
+                        "records": [],
+                    })
+                    return
 
         # Step 3: Fetch data from all sites using the winning URL template
         all_records = []
