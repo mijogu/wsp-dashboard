@@ -296,6 +296,37 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             self._json_response({"error": str(e)}, 502)
 
+    # ─── Shared MainWP helpers ────────────────────────────────
+    @staticmethod
+    def _fetch_all_mainwp_sites(base_url, json_headers, per_page=100):
+        """
+        Paginate through /mainwp/v2/sites until all sites are collected.
+        Returns (sites_list, error_message_or_None).
+        MainWP defaults to 20 per page; we request 100 and keep paging.
+        """
+        all_sites = []
+        page = 1
+        while True:
+            url = f"{base_url}/wp-json/mainwp/v2/sites?per_page={per_page}&page={page}"
+            resp = http_requests.get(url, headers=json_headers, timeout=30)
+            if resp.status_code != 200:
+                return None, f"HTTP {resp.status_code} fetching sites (page {page})"
+            try:
+                data = resp.json()
+            except Exception as e:
+                return None, f"Non-JSON sites response (page {page}): {e}"
+
+            # Unwrap common envelope shapes
+            batch = (data if isinstance(data, list)
+                     else data.get("data") or data.get("sites") or [])
+            if not batch:
+                break   # empty page → done
+            all_sites.extend(batch)
+            if len(batch) < per_page:
+                break   # last page (partial)
+            page += 1
+        return all_sites, None
+
     # ─── MainWP Proxy ─────────────────────────────────────────
     def _proxy_mainwp_sites(self):
         s = get_settings()
@@ -308,54 +339,33 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             add_log("MainWP", "warn", f"Not configured — missing: {', '.join(missing)}")
             self._json_response({"error": "MainWP not configured"}, 400)
             return
-        url = f"{base_url}/wp-json/mainwp/v2/sites"
-        add_log("MainWP", "info", f"Requesting {url}")
-        add_log("MainWP", "info", f"Auth: Bearer token ({len(api_key)} chars, starts with '{api_key[:6]}...')")
+
+        json_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        add_log("MainWP", "info",
+                f"Requesting all sites from {base_url} (paginated, per_page=100)")
         try:
-            resp = http_requests.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                timeout=30,
-            )
-            add_log("MainWP", "info", f"HTTP {resp.status_code} — Content-Type: {resp.headers.get('Content-Type', 'unknown')}")
-            # Log first 300 chars of raw response for debugging
-            raw = resp.text
-            add_log("MainWP", "info", f"Raw response preview: {raw[:300]}")
-            try:
-                data = resp.json()
-            except Exception:
-                add_log("MainWP", "error", f"Response is not valid JSON (HTTP {resp.status_code})", raw[:500])
-                self._json_response({"error": f"MainWP returned non-JSON (HTTP {resp.status_code})"}, 502)
+            sites_list, err = self._fetch_all_mainwp_sites(base_url, json_headers)
+            if err:
+                add_log("MainWP", "error", f"Sites fetch failed: {err}")
+                self._json_response({"error": err}, 502)
                 return
-            if resp.status_code == 200:
-                sites_list = (data if isinstance(data, list)
-                              else data.get("data") or data.get("sites") or [])
-                if sites_list:
-                    add_log("MainWP", "ok", f"Got {len(sites_list)} sites")
-                    try:
-                        cache_sites(sites_list)
-                        add_log("DB", "ok", f"Cached {len(sites_list)} sites")
-                    except Exception as e:
-                        add_log("DB", "warn", f"Site cache failed: {e}")
-                else:
-                    add_log("MainWP", "warn",
-                            f"Unexpected 200 structure: keys="
-                            f"{list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
-            elif resp.status_code == 401:
-                add_log("MainWP", "error", "401 Unauthorized — API key may be invalid or expired")
-            elif resp.status_code == 403:
-                add_log("MainWP", "error", "403 Forbidden — API key may lack read permissions")
-            else:
-                add_log("MainWP", "error", f"HTTP {resp.status_code}", data)
-            self._json_response(data)
+
+            add_log("MainWP", "ok", f"Got {len(sites_list)} sites total")
+            try:
+                cache_sites(sites_list)
+                add_log("DB", "ok", f"Cached {len(sites_list)} sites")
+            except Exception as e:
+                add_log("DB", "warn", f"Site cache failed: {e}")
+
+            self._json_response(sites_list)
         except http_requests.exceptions.ConnectionError as e:
             add_log("MainWP", "error", f"Connection failed — is {base_url} reachable?", str(e))
             self._json_response({"error": f"Cannot connect to {base_url}: {e}"}, 502)
         except http_requests.exceptions.Timeout:
-            add_log("MainWP", "error", f"Request timed out after 30s")
+            add_log("MainWP", "error", "Request timed out after 30s")
             self._json_response({"error": "MainWP request timed out"}, 502)
         except Exception as e:
             add_log("MainWP", "error", f"Request failed: {e}")
@@ -452,13 +462,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 f"Fetching update history ({sync_mode}): "
                 f"{start_date_str} → {end_date_str} ({days} days)")
 
-        # Step 1: Get all sites
+        # Step 1: Get all sites (paginated)
         try:
-            sites_url = f"{base_url}/wp-json/mainwp/v2/sites"
-            resp = http_requests.get(sites_url, headers=json_headers, timeout=30)
-            sites_data = resp.json()
-            sites = sites_data.get("data") or sites_data.get("result") or (
-                sites_data if isinstance(sites_data, list) else [])
+            sites, err = self._fetch_all_mainwp_sites(base_url, json_headers)
+            if err or sites is None:
+                raise RuntimeError(err or "Unknown error fetching sites")
             add_log("ProReports", "info", f"Got {len(sites)} sites to query")
         except Exception as e:
             add_log("ProReports", "error", f"Failed to get sites: {e}")

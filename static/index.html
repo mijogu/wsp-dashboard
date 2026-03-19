@@ -67,6 +67,32 @@
         .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
         .btn-primary:hover { opacity: 0.9; }
 
+        /* Filter bar pills */
+        .pill {
+            padding: 4px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .pill:hover { border-color: var(--accent); color: var(--text); }
+        .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+        /* Filter bar text inputs */
+        .filter-input {
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            color-scheme: dark;
+        }
+        .filter-input:focus { outline: none; border-color: var(--accent); }
+
         .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
         .alert-banner {
@@ -491,6 +517,32 @@
                     <span>🔄 Last synced: <strong id="dbStatFetch">—</strong></span>
                 </div>
             </div>
+            <!-- Filter bar (shown once data is loaded) -->
+            <div id="historyFilterBar" style="display:none; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                    <!-- Site dropdown -->
+                    <select id="filterSite" class="filter-input" style="min-width:160px; max-width:220px;">
+                        <option value="">All sites</option>
+                    </select>
+                    <!-- Type pills -->
+                    <div style="display:flex; gap:6px; flex-shrink:0;">
+                        <button class="pill active" data-type="">All</button>
+                        <button class="pill" data-type="plugins">Plugins</button>
+                        <button class="pill" data-type="themes">Themes</button>
+                        <button class="pill" data-type="wordpress">WordPress</button>
+                    </div>
+                    <!-- Name search -->
+                    <input type="text" id="filterName" class="filter-input"
+                        placeholder="Search name…" style="flex:1; min-width:140px;">
+                    <!-- Date range -->
+                    <input type="date" id="filterDateFrom" class="filter-input" title="From date">
+                    <span style="font-size:12px; color:var(--text-muted);">→</span>
+                    <input type="date" id="filterDateTo" class="filter-input" title="To date">
+                    <!-- Clear + result count -->
+                    <button class="btn" id="filterClearBtn" style="font-size:12px; padding:5px 10px; flex-shrink:0;">✕ Clear</button>
+                    <span id="filterCount" style="font-size:12px; color:var(--text-muted); flex-shrink:0;"></span>
+                </div>
+            </div>
             <div class="log-table-wrap">
                 <table class="log-table" id="historyTable">
                     <thead>
@@ -507,7 +559,7 @@
                 </table>
             </div>
             <p id="historyEmpty" style="text-align:center; color:var(--text-muted); padding:40px 0; display:none;">
-                Click "Fetch History" to load update records from MainWP Pro Reports.
+                Click "Sync Updates" to load update records from MainWP Pro Reports.
             </p>
         </div>
 
@@ -1668,10 +1720,14 @@
             runHistorySync(null, null); // let server decide dates (incremental)
         });
 
-        // ── Export CSV ───────────────────────────────────────────────────────────
+        // ── Export CSV (respects active filters) ─────────────────────────────────
         document.getElementById('historyExportBtn').addEventListener('click', () => {
-            // Export full archive from DB
-            window.open('/api/mainwp/update-history/cached?format=csv', '_blank');
+            const f = getActiveFilters();
+            const p = new URLSearchParams({ format: 'csv' });
+            if (f.type)     p.set('type',    f.type);
+            if (f.site_id)  p.set('site_id', f.site_id);
+            // Date filters are client-side only, but we still export the full type/site slice
+            window.open(`/api/mainwp/update-history/cached?${p}`, '_blank');
         });
 
         // ── Backfill Panel ───────────────────────────────────────────────────────
@@ -1795,6 +1851,68 @@
             } catch (e) { /* silently skip */ }
         }
 
+        // ── Filter bar wiring ─────────────────────────────────────────────────────
+
+        // Read the currently selected type pill's value
+        let _activeType = '';
+        // Map site name → site_id for the dropdown; populated by buildSiteDropdown()
+        let _siteIdMap = {};
+
+        function getActiveFilters() {
+            return {
+                type:     _activeType,
+                site:     document.getElementById('filterSite').value,     // site name
+                site_id:  _siteIdMap[document.getElementById('filterSite').value] || '',
+                name:     document.getElementById('filterName').value.toLowerCase().trim(),
+                dateFrom: document.getElementById('filterDateFrom').value, // YYYY-MM-DD
+                dateTo:   document.getElementById('filterDateTo').value,
+            };
+        }
+
+        // Populate site dropdown from loaded historyData
+        function buildSiteDropdown() {
+            const sel = document.getElementById('filterSite');
+            const current = sel.value;
+            // Collect unique site names + map to id
+            const siteMap = {};
+            historyData.forEach(r => {
+                const name = r._site_name || r.site_name || '';
+                const id   = r._site_id   || r.site_id   || '';
+                if (name) siteMap[name] = id;
+            });
+            _siteIdMap = siteMap;
+            const names = Object.keys(siteMap).sort();
+            sel.innerHTML = '<option value="">All sites</option>'
+                + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+            if (names.includes(current)) sel.value = current;
+        }
+
+        // Type pill clicks
+        document.querySelectorAll('#historyFilterBar .pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#historyFilterBar .pill').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                _activeType = btn.dataset.type;
+                renderHistory();
+            });
+        });
+
+        document.getElementById('filterSite').addEventListener('change', renderHistory);
+        document.getElementById('filterName').addEventListener('input',  renderHistory);
+        document.getElementById('filterDateFrom').addEventListener('change', renderHistory);
+        document.getElementById('filterDateTo').addEventListener('change', renderHistory);
+
+        document.getElementById('filterClearBtn').addEventListener('click', () => {
+            _activeType = '';
+            document.querySelectorAll('#historyFilterBar .pill').forEach(p => p.classList.remove('active'));
+            document.querySelector('#historyFilterBar .pill[data-type=""]').classList.add('active');
+            document.getElementById('filterSite').value = '';
+            document.getElementById('filterName').value = '';
+            document.getElementById('filterDateFrom').value = '';
+            document.getElementById('filterDateTo').value = '';
+            renderHistory();
+        });
+
         // ── Record normalisation + rendering ─────────────────────────────────────
         // Normalize a record so field names work regardless of source.
         // Live fetch uses _site_name/_update_type; DB uses site_name/update_type
@@ -1810,21 +1928,67 @@
         }
 
         function renderHistory() {
-            const tbody = document.getElementById('historyBody');
-            const empty = document.getElementById('historyEmpty');
+            const tbody  = document.getElementById('historyBody');
+            const empty  = document.getElementById('historyEmpty');
+            const bar    = document.getElementById('historyFilterBar');
+            const countEl = document.getElementById('filterCount');
 
             let records = historyData.map(normalizeRecord);
 
             if (!records.length) {
+                bar.style.display = 'none';
                 tbody.innerHTML = '';
                 empty.style.display = '';
                 empty.textContent = 'No update records found. Click "Sync Updates" to fetch from MainWP.';
+                countEl.textContent = '';
                 return;
             }
 
+            // Show filter bar and rebuild site dropdown
+            bar.style.display = '';
+            buildSiteDropdown();
+
+            // Apply filters
+            const f = getActiveFilters();
+            if (f.type) {
+                records = records.filter(r => r._update_type === f.type);
+            }
+            if (f.site) {
+                records = records.filter(r => (r._site_name || '') === f.site);
+            }
+            if (f.name) {
+                records = records.filter(r => {
+                    const n = (r.name || r.title || r.slug || '').toLowerCase();
+                    return n.includes(f.name);
+                });
+            }
+            if (f.dateFrom) {
+                records = records.filter(r => {
+                    const d = (r.updated_date || r.updated_utime || '').slice(0, 10);
+                    return d >= f.dateFrom;
+                });
+            }
+            if (f.dateTo) {
+                records = records.filter(r => {
+                    const d = (r.updated_date || r.updated_utime || '').slice(0, 10);
+                    return d <= f.dateTo;
+                });
+            }
+
+            const total = historyData.length;
+            countEl.textContent = records.length < total
+                ? `${records.length.toLocaleString()} of ${total.toLocaleString()}`
+                : `${total.toLocaleString()} records`;
+
+            if (!records.length) {
+                tbody.innerHTML = '';
+                empty.style.display = '';
+                empty.textContent = 'No records match the current filters.';
+                return;
+            }
             empty.style.display = 'none';
 
-            // Sort by date descending using updated_utime (e.g. "2026-03-17 16:15:35")
+            // Sort by date descending
             records.sort((a, b) => {
                 const aVal = a.updated_utime || a.updated_date || '';
                 const bVal = b.updated_utime || b.updated_date || '';
