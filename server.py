@@ -27,7 +27,8 @@ from config import (
 )
 from db import (
     init_db, save_update_records, get_update_history,
-    get_history_stats, cache_sites, get_cached_sites, get_cache_age,
+    get_history_stats, get_last_fetch_date,
+    cache_sites, get_cached_sites, get_cache_age,
 )
 
 PORT = 9111
@@ -398,9 +399,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         """
         Fetch historical update data from Pro Reports for all sites.
         Query params:
-          ?days=30        — lookback period (default 30)
-          ?format=csv     — return CSV instead of JSON
-          ?site_id=123    — optional: limit to one site
+          ?start_date=YYYY-MM-DD  — explicit start (overrides incremental default)
+          ?end_date=YYYY-MM-DD    — explicit end (default: today)
+          ?format=csv             — return CSV instead of JSON
+          ?site_id=123            — optional: limit to one site
+
+        Default behaviour (no start_date given):
+          - start_date = last fetch's date_to from DB (incremental sync)
+          - if no prior fetch, falls back to 30 days ago
         """
         s = get_settings()
         base_url = s.get("mwpUrl", "").rstrip("/")
@@ -410,20 +416,41 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
         qs = parse_qs(parsed.query)
-        days = int(qs.get("days", ["30"])[0])
         fmt = qs.get("format", ["json"])[0]
         filter_site = qs.get("site_id", [None])[0]
 
-        auth_headers = {"Authorization": f"Bearer {api_key}"}
-        json_headers = {**auth_headers, "Content-Type": "application/json"}
+        today = datetime.now().strftime("%Y-%m-%d")
 
-        # Date range
-        date_to = int(time.time())
-        date_from = date_to - (days * 86400)
+        # Determine date range
+        end_date_str = qs.get("end_date", [today])[0]
+        if "start_date" in qs:
+            start_date_str = qs["start_date"][0]
+            sync_mode = "backfill"
+        else:
+            last_fetch = get_last_fetch_date()
+            if last_fetch:
+                start_date_str = last_fetch
+                sync_mode = "incremental"
+            else:
+                # First ever fetch — go back 30 days
+                start_date_str = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+                sync_mode = "initial"
+
+        # Convert ISO dates to unix timestamps (for probe URL building)
+        try:
+            dt_from = datetime.strptime(start_date_str, "%Y-%m-%d")
+            dt_to   = datetime.strptime(end_date_str,   "%Y-%m-%d")
+        except ValueError as e:
+            self._json_response({"error": f"Invalid date format: {e}"}, 400)
+            return
+
+        date_from = int(dt_from.timestamp())
+        date_to   = int(dt_to.timestamp())
+        days = max(1, (dt_to - dt_from).days)
+
         add_log("ProReports", "info",
-                f"Fetching update history: last {days} days "
-                f"({datetime.fromtimestamp(date_from).strftime('%Y-%m-%d')} → "
-                f"{datetime.fromtimestamp(date_to).strftime('%Y-%m-%d')})")
+                f"Fetching update history ({sync_mode}): "
+                f"{start_date_str} → {end_date_str} ({days} days)")
 
         # Step 1: Get all sites
         try:
@@ -460,10 +487,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         winning_method = None
 
         # Date formats to try
-        iso_from = datetime.fromtimestamp(date_from).strftime('%Y-%m-%d')
-        iso_to = datetime.fromtimestamp(date_to).strftime('%Y-%m-%d')
-        us_from = datetime.fromtimestamp(date_from).strftime('%m/%d/%Y')
-        us_to = datetime.fromtimestamp(date_to).strftime('%m/%d/%Y')
+        iso_from = start_date_str
+        iso_to   = end_date_str
+        us_from = dt_from.strftime('%m/%d/%Y')
+        us_to   = dt_to.strftime('%m/%d/%Y')
 
         # Build a comprehensive set of probes
         probe_attempts = []
@@ -644,12 +671,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 f"Total: {len(all_records)} records across {len(sites)} sites")
 
         # Step 4: Persist to SQLite
-        df = datetime.fromtimestamp(date_from).isoformat()
-        dt = datetime.fromtimestamp(date_to).isoformat()
         if all_records:
             try:
                 db_stats = save_update_records(
-                    all_records, df, dt, days, len(sites))
+                    all_records, start_date_str, end_date_str, days, len(sites))
                 add_log("DB", "ok",
                         f"Saved to DB — {db_stats['new']} new, "
                         f"{db_stats['duplicate']} already stored")
@@ -660,12 +685,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if fmt == "csv":
             # Export from DB so CSV always has the full archive, not just this fetch
             try:
-                db_records = get_update_history(days=days)
+                db_records = get_update_history()
                 output = self._records_to_csv(db_records)
-                filename = f"update-history-{days}d.csv"
+                filename = f"update-history-{start_date_str}-to-{end_date_str}.csv"
             except Exception:
                 output = self._records_to_csv(all_records)
-                filename = f"update-history-{days}d-live.csv"
+                filename = f"update-history-{start_date_str}-to-{end_date_str}-live.csv"
             self.send_response(200)
             self.send_header("Content-Type", "text/csv; charset=utf-8")
             self.send_header("Content-Disposition",
@@ -674,9 +699,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.wfile.write(output.encode("utf-8"))
         else:
             self._json_response({
+                "sync_mode": sync_mode,
+                "date_from": start_date_str,
+                "date_to": end_date_str,
                 "days": days,
-                "date_from": df,
-                "date_to": dt,
                 "total_records": len(all_records),
                 "sites_queried": len(sites),
                 "records": all_records,
@@ -720,6 +746,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         """Return summary stats about what's in the SQLite DB."""
         try:
             stats = get_history_stats()
+            # Include last fetch date for incremental-sync UI
+            stats["last_fetch_date"] = get_last_fetch_date()
             self._json_response(stats)
         except Exception as e:
             self._json_response({"error": str(e)}, 500)

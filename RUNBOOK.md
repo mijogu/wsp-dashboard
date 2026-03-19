@@ -72,10 +72,10 @@ SELECT site_name, COUNT(*) AS updates FROM update_history GROUP BY site_name ORD
 | `/api/mainwp/updates`                 | GET    | Proxy: MainWP pending updates      |
 | `/api/mainwp/raw/{path}`              | GET    | Proxy: any MainWP v2 endpoint      |
 | `/api/mainwp/routes`                  | GET    | Discover all MainWP REST routes    |
-| `/api/mainwp/update-history`          | GET    | Fetch live update history from Pro Reports (saves to DB) |
+| `/api/mainwp/update-history`          | GET    | Fetch live update history from Pro Reports (saves to DB). Default: incremental from last fetch. Params: `start_date=YYYY-MM-DD`, `end_date=YYYY-MM-DD` |
 | `/api/mainwp/update-history/cached`   | GET    | Load stored update history from SQLite (no API call) |
-| `/api/mainwp/update-history/cached?format=csv` | GET | Export cached history as CSV |
-| `/api/db/stats`                       | GET    | SQLite stats: record count, date range, last fetch |
+| `/api/mainwp/update-history/cached?format=csv` | GET | Export full cached history as CSV |
+| `/api/db/stats`                       | GET    | SQLite stats: record count, date range, last fetch, `last_fetch_date` for incremental sync |
 | `/api/logs`                           | GET    | Server log entries                 |
 | `/api/export`                         | GET    | Export encrypted config (base64)   |
 | `/api/import`                         | POST   | Import encrypted config            |

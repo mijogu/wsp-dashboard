@@ -217,6 +217,19 @@ def get_history_stats() -> dict:
     }
 
 
+def get_last_fetch_date() -> str | None:
+    """
+    Return the date_to of the most recent fetch_log entry.
+    Used to compute default start_date for incremental syncs.
+    Returns ISO date string (YYYY-MM-DD) or None if no fetches yet.
+    """
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT date_to FROM fetch_log ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    return row[0] if row else None
+
+
 # ─── Sites Cache ───────────────────────────────────────────────
 
 

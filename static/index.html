@@ -456,37 +456,40 @@
 
         <!-- Update History Tab -->
         <div id="history" class="tab-content">
-            <div style="display:flex; align-items:center; gap:16px; margin-bottom:20px; flex-wrap:wrap;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <label style="font-size:13px; color:var(--text-muted);">Period:</label>
-                    <select id="historyDays" style="background:var(--surface-2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:13px;">
-                        <option value="7">Last 7 days</option>
-                        <option value="30" selected>Last 30 days</option>
-                        <option value="60">Last 60 days</option>
-                        <option value="90">Last 90 days</option>
-                        <option value="180">Last 6 months</option>
-                        <option value="365">Last year</option>
-                    </select>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <label style="font-size:13px; color:var(--text-muted);">Type:</label>
-                    <select id="historyType" style="background:var(--surface-2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:13px;">
-                        <option value="all">All</option>
-                        <option value="plugins">Plugins</option>
-                        <option value="themes">Themes</option>
-                        <option value="wordpress">WordPress</option>
-                    </select>
-                </div>
-                <button class="btn btn-primary" id="historyFetchBtn">Fetch from MainWP</button>
-                <button class="btn" id="historyCachedBtn">Load Cached</button>
-                <button class="btn" id="historyExportBtn" style="display:none;">Export CSV</button>
+            <!-- Primary action row -->
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap;">
+                <button class="btn btn-primary" id="historySyncBtn">⟳ Sync Updates</button>
+                <span id="historySyncInfo" style="font-size:12px; color:var(--text-muted); line-height:1.4;"></span>
+                <div style="flex:1;"></div>
+                <button class="btn" id="historyBackfillToggle" style="font-size:12px; padding:5px 12px;">↩ Backfill</button>
+                <button class="btn" id="historyExportBtn" style="display:none;">⬇ Export CSV</button>
+            </div>
+            <!-- Status line -->
+            <div style="min-height:18px; margin-bottom:10px;">
                 <span id="historyStatus" style="font-size:12px; color:var(--text-muted);"></span>
             </div>
-            <div id="dbStatsBar" style="display:none; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:10px 16px; margin-bottom:16px; font-size:12px; color:var(--text-muted); display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
-                <span>📦 <strong id="dbStatTotal">—</strong> records stored</span>
-                <span>🌐 <strong id="dbStatSites">—</strong> sites</span>
-                <span>📅 Since <strong id="dbStatOldest">—</strong></span>
-                <span>🔄 Last fetch: <strong id="dbStatFetch">—</strong></span>
+            <!-- Backfill panel (hidden by default) -->
+            <div id="historyBackfillPanel" style="display:none; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin-bottom:12px;">
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <label style="font-size:13px; color:var(--text-muted);">From:</label>
+                    <input type="date" id="historyBackfillFrom"
+                        style="background:var(--surface); border:1px solid var(--border); color:var(--text); padding:5px 10px; border-radius:6px; font-size:13px; color-scheme:dark;">
+                    <label style="font-size:13px; color:var(--text-muted);">To:</label>
+                    <input type="date" id="historyBackfillTo"
+                        style="background:var(--surface); border:1px solid var(--border); color:var(--text); padding:5px 10px; border-radius:6px; font-size:13px; color-scheme:dark;">
+                    <span id="historyBackfillPreview" style="font-size:12px; color:var(--accent);"></span>
+                    <button class="btn btn-primary" id="historyBackfillRunBtn" style="padding:5px 14px;">Fetch Range</button>
+                    <button class="btn" id="historyBackfillCloseBtn" style="padding:5px 12px;">Cancel</button>
+                </div>
+            </div>
+            <!-- DB Stats bar -->
+            <div id="dbStatsBar" style="display:none; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:10px 16px; margin-bottom:16px; font-size:12px; color:var(--text-muted);">
+                <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
+                    <span>📦 <strong id="dbStatTotal">—</strong> records stored</span>
+                    <span>🌐 <strong id="dbStatSites">—</strong> sites</span>
+                    <span>📅 Since <strong id="dbStatOldest">—</strong></span>
+                    <span>🔄 Last synced: <strong id="dbStatFetch">—</strong></span>
+                </div>
             </div>
             <div class="log-table-wrap">
                 <table class="log-table" id="historyTable">
@@ -1622,58 +1625,126 @@
         // Update History Tab
         // ============================================================================
         let historyData = [];
+        let lastFetchDate = null; // populated by loadDbStats
 
-        document.getElementById('historyFetchBtn').addEventListener('click', async () => {
-            const days = document.getElementById('historyDays').value;
-            const btn = document.getElementById('historyFetchBtn');
+        // ── Sync Updates (incremental) ───────────────────────────────────────────
+        async function runHistorySync(startDate, endDate) {
+            const btn = document.getElementById('historySyncBtn');
             const status = document.getElementById('historyStatus');
 
             btn.disabled = true;
-            btn.textContent = 'Fetching...';
-            status.textContent = 'Querying Pro Reports across all sites...';
+            btn.textContent = '⟳ Syncing…';
+            status.textContent = 'Querying Pro Reports across all sites…';
+
+            const params = new URLSearchParams();
+            if (startDate) params.set('start_date', startDate);
+            if (endDate)   params.set('end_date',   endDate);
 
             try {
-                const data = await apiCall(`/mainwp/update-history?days=${days}`);
-                historyData = data.records || [];
-                status.textContent = `${data.total_records} records from ${data.sites_queried} sites (${data.date_from.split('T')[0]} → ${data.date_to.split('T')[0]})`;
-                renderHistory();
+                const data = await apiCall(`/mainwp/update-history?${params}`);
+                const newRecs = data.total_records || 0;
+                const mode = data.sync_mode || 'fetch';
+                status.textContent =
+                    `${newRecs} records fetched (${data.date_from} → ${data.date_to}) `
+                    + `across ${data.sites_queried} sites`;
+
+                // Reload cached view and stats after sync
+                await loadCachedHistory(true);
+                await loadDbStats();
 
                 if (historyData.length > 0) {
                     document.getElementById('historyExportBtn').style.display = '';
                 }
             } catch (e) {
                 status.textContent = `Error: ${e.message}`;
-                console.error('History fetch error:', e);
+                console.error('History sync error:', e);
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Fetch History';
+                btn.textContent = '⟳ Sync Updates';
+            }
+        }
+
+        document.getElementById('historySyncBtn').addEventListener('click', () => {
+            runHistorySync(null, null); // let server decide dates (incremental)
+        });
+
+        // ── Export CSV ───────────────────────────────────────────────────────────
+        document.getElementById('historyExportBtn').addEventListener('click', () => {
+            // Export full archive from DB
+            window.open('/api/mainwp/update-history/cached?format=csv', '_blank');
+        });
+
+        // ── Backfill Panel ───────────────────────────────────────────────────────
+        const backfillPanel  = document.getElementById('historyBackfillPanel');
+        const backfillToggle = document.getElementById('historyBackfillToggle');
+        const backfillFrom   = document.getElementById('historyBackfillFrom');
+        const backfillTo     = document.getElementById('historyBackfillTo');
+        const backfillPreview = document.getElementById('historyBackfillPreview');
+        const backfillRunBtn = document.getElementById('historyBackfillRunBtn');
+        const backfillClose  = document.getElementById('historyBackfillCloseBtn');
+
+        // Default the "To" date to today
+        backfillTo.value = new Date().toISOString().slice(0, 10);
+
+        function updateBackfillPreview() {
+            const from = backfillFrom.value;
+            const to   = backfillTo.value;
+            if (from && to) {
+                const days = Math.round(
+                    (new Date(to) - new Date(from)) / 86400000);
+                backfillPreview.textContent = days >= 0
+                    ? `${days} day${days !== 1 ? 's' : ''}`
+                    : '⚠ End must be after start';
+            } else {
+                backfillPreview.textContent = '';
+            }
+        }
+
+        backfillToggle.addEventListener('click', () => {
+            const open = backfillPanel.style.display !== 'none';
+            backfillPanel.style.display = open ? 'none' : 'block';
+            backfillToggle.textContent = open ? '↩ Backfill' : '✕ Backfill';
+            // Pre-fill "from" to last fetch date when opening
+            if (!open && lastFetchDate && !backfillFrom.value) {
+                backfillFrom.value = lastFetchDate;
+                updateBackfillPreview();
             }
         });
 
-        document.getElementById('historyExportBtn').addEventListener('click', () => {
-            const days = document.getElementById('historyDays').value;
-            const type = document.getElementById('historyType').value;
-            // Export from DB cache (full archive, not just current view)
-            const params = new URLSearchParams({ format: 'csv' });
-            if (days) params.set('days', days);
-            if (type !== 'all') params.set('type', type);
-            window.open(`/api/mainwp/update-history/cached?${params}`, '_blank');
+        backfillClose.addEventListener('click', () => {
+            backfillPanel.style.display = 'none';
+            backfillToggle.textContent = '↩ Backfill';
         });
 
-        // Shared function — called by button, tab switch, and startup
+        backfillFrom.addEventListener('change', updateBackfillPreview);
+        backfillTo.addEventListener('change', updateBackfillPreview);
+
+        backfillRunBtn.addEventListener('click', () => {
+            const from = backfillFrom.value;
+            const to   = backfillTo.value;
+            if (!from || !to) {
+                backfillPreview.textContent = '⚠ Please choose both dates';
+                return;
+            }
+            if (new Date(to) < new Date(from)) {
+                backfillPreview.textContent = '⚠ End must be after start';
+                return;
+            }
+            backfillPanel.style.display = 'none';
+            backfillToggle.textContent = '↩ Backfill';
+            runHistorySync(from, to);
+        });
+
+        // ── Load Cached (auto-called; no explicit button anymore) ─────────────
         async function loadCachedHistory(silent = false) {
-            const btn = document.getElementById('historyCachedBtn');
             const status = document.getElementById('historyStatus');
-            const days = document.getElementById('historyDays').value;
 
             if (!silent) {
-                btn.disabled = true;
-                btn.textContent = 'Loading...';
-                status.textContent = 'Reading from local database...';
+                status.textContent = 'Reading from local database…';
             }
 
             try {
-                const data = await apiCall(`/mainwp/update-history/cached?days=${days}`);
+                const data = await apiCall('/mainwp/update-history/cached');
                 historyData = data.records || [];
                 if (historyData.length) {
                     if (!silent) {
@@ -1682,24 +1753,33 @@
                     document.getElementById('historyExportBtn').style.display = '';
                     renderHistory();
                 } else if (!silent) {
-                    status.textContent = 'No cached records yet — use "Fetch from MainWP" to populate.';
+                    status.textContent = 'No cached records yet — click "Sync Updates" to fetch from MainWP.';
                 }
             } catch (e) {
                 if (!silent) status.textContent = `Error: ${e.message}`;
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Load Cached';
             }
         }
 
-        document.getElementById('historyCachedBtn').addEventListener('click', () => loadCachedHistory(false));
-
+        // ── DB Stats bar ─────────────────────────────────────────────────────────
         async function loadDbStats() {
             try {
                 const stats = await apiCall('/db/stats');
                 const bar = document.getElementById('dbStatsBar');
+
+                // Save last fetch date for incremental sync info + backfill pre-fill
+                lastFetchDate = stats.last_fetch_date || null;
+
+                // Update sync info label next to Sync button
+                const syncInfo = document.getElementById('historySyncInfo');
+                if (lastFetchDate) {
+                    const today = new Date().toISOString().slice(0, 10);
+                    syncInfo.textContent = `Will sync: ${lastFetchDate} → ${today}`;
+                } else {
+                    syncInfo.textContent = 'No prior sync — will fetch last 30 days';
+                }
+
                 if (stats.total_records > 0) {
-                    bar.style.display = 'flex';
+                    bar.style.display = 'block';
                     document.getElementById('dbStatTotal').textContent =
                         stats.total_records.toLocaleString();
                     document.getElementById('dbStatSites').textContent =
@@ -1715,7 +1795,8 @@
             } catch (e) { /* silently skip */ }
         }
 
-        // Normalize a record so field names work regardless of source
+        // ── Record normalisation + rendering ─────────────────────────────────────
+        // Normalize a record so field names work regardless of source.
         // Live fetch uses _site_name/_update_type; DB uses site_name/update_type
         function normalizeRecord(r) {
             return {
@@ -1729,21 +1810,15 @@
         }
 
         function renderHistory() {
-            const typeFilter = document.getElementById('historyType').value;
             const tbody = document.getElementById('historyBody');
             const empty = document.getElementById('historyEmpty');
 
             let records = historyData.map(normalizeRecord);
-            if (typeFilter !== 'all') {
-                records = records.filter(r => r._update_type === typeFilter);
-            }
 
             if (!records.length) {
                 tbody.innerHTML = '';
                 empty.style.display = '';
-                empty.textContent = historyData.length
-                    ? 'No records match the selected type filter.'
-                    : 'No update records found for this period. Try a longer time range.';
+                empty.textContent = 'No update records found. Click "Sync Updates" to fetch from MainWP.';
                 return;
             }
 
@@ -1767,11 +1842,9 @@
                 const name = rec.name || rec.title || rec.slug || '—';
                 const oldVer = rec.old_version || '—';
                 const newVer = rec.current_version || rec.new_version || '—';
-                // Use the human-readable date + time if available
                 const date = rec.updated_date
                     ? `${rec.updated_date}${rec.updated_time ? ' ' + rec.updated_time : ''}`
                     : (rec.updated_utime || '—');
-                const author = rec.updated_author || '';
 
                 return `<tr>
                     <td>${escapeHtml(rec._site_name || '—')}</td>
@@ -1783,9 +1856,6 @@
                 </tr>`;
             }).join('');
         }
-
-        // Re-render when type filter changes
-        document.getElementById('historyType').addEventListener('change', renderHistory);
 
         // ============================================================================
         // Startup
