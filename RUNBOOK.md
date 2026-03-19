@@ -121,16 +121,38 @@ http://localhost:9111/api/mainwp/routes                 # All registered MainWP 
 
 ---
 
+## Running Tests
+
+```bash
+cd ~/DEV/wsp-dashboard
+source venv/bin/activate
+python -m unittest discover tests/ -v
+```
+
+**53 tests across 2 files** — all should pass in under 2 seconds.
+Each test gets an isolated temp database / config file; nothing touches `dashboard.db` or `config.enc`.
+
+| Test file               | What it covers                                      |
+|-------------------------|-----------------------------------------------------|
+| `tests/test_db.py`      | SQLite layer: save, dedup, filters, stats, site cache |
+| `tests/test_config.py`  | AES-256-GCM encrypt/decrypt, save/load, export/import, session |
+
+---
+
 ## Files
 
 | File              | Purpose                                      |
 |-------------------|----------------------------------------------|
 | `server.py`       | Python HTTP server, API proxy, logging        |
 | `config.py`       | AES-256-GCM encrypted config manager          |
+| `db.py`           | SQLite persistence layer                      |
 | `config.enc`      | Encrypted API keys (gitignored)               |
 | `.session`        | Saved session for auto-unlock (gitignored)    |
+| `dashboard.db`    | SQLite database — update history, site cache (gitignored) |
 | `static/index.html` | Dashboard frontend (single-file)           |
 | `requirements.txt`| Python dependencies                           |
+| `tests/test_db.py`    | Unit tests for db.py                      |
+| `tests/test_config.py` | Unit tests for config.py                 |
 
 ---
 
