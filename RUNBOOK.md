@@ -2,6 +2,19 @@
 
 Commands, endpoints, and URLs referenced during development.
 
+## Contents
+
+- [Running the Server](#running-the-server)
+- [Setup (First Time)](#setup-first-time)
+- [SQLite Database](#sqlite-database)
+- [API Keys — Where to Find Them](#api-keys--where-to-find-them)
+- [Dashboard API Endpoints](#dashboard-api-endpoints-localhost9111)
+- [MainWP Discovery URLs](#mainwp-discovery-urls)
+- [External API Endpoints](#external-api-endpoints-proxied-by-server)
+- [Running Tests](#running-tests)
+- [Files](#files)
+- [Troubleshooting](#troubleshooting)
+
 ---
 
 ## Running the Server
