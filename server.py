@@ -25,6 +25,10 @@ from config import (
     export_config, import_config,
     save_session, load_session, clear_session, session_exists,
 )
+from db import (
+    init_db, save_update_records, get_update_history,
+    get_history_stats, cache_sites, get_cached_sites, get_cache_age,
+)
 
 PORT = 9111
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -104,6 +108,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._discover_mainwp_routes()
         elif path == "/api/mainwp/update-history":
             self._proxy_mainwp_update_history(parsed)
+        elif path == "/api/mainwp/update-history/cached":
+            self._serve_cached_history(parsed)
+        elif path == "/api/db/stats":
+            self._serve_db_stats()
         elif path.startswith("/api/mainwp/raw/"):
             # Discovery/debug: proxy any MainWP endpoint
             # e.g. /api/mainwp/raw/sites or /api/mainwp/raw/sites/69
@@ -322,13 +330,19 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._json_response({"error": f"MainWP returned non-JSON (HTTP {resp.status_code})"}, 502)
                 return
             if resp.status_code == 200:
-                if isinstance(data, list):
-                    add_log("MainWP", "ok", f"Got {len(data)} sites")
-                elif isinstance(data, dict) and (data.get("data") or data.get("sites")):
-                    items = data.get("data") or data.get("sites") or []
-                    add_log("MainWP", "ok", f"Got {len(items)} sites (wrapped)")
+                sites_list = (data if isinstance(data, list)
+                              else data.get("data") or data.get("sites") or [])
+                if sites_list:
+                    add_log("MainWP", "ok", f"Got {len(sites_list)} sites")
+                    try:
+                        cache_sites(sites_list)
+                        add_log("DB", "ok", f"Cached {len(sites_list)} sites")
+                    except Exception as e:
+                        add_log("DB", "warn", f"Site cache failed: {e}")
                 else:
-                    add_log("MainWP", "warn", f"Unexpected 200 response structure: keys={list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+                    add_log("MainWP", "warn",
+                            f"Unexpected 200 structure: keys="
+                            f"{list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
             elif resp.status_code == 401:
                 add_log("MainWP", "error", "401 Unauthorized — API key may be invalid or expired")
             elif resp.status_code == 403:
@@ -629,24 +643,86 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         add_log("ProReports", "ok",
                 f"Total: {len(all_records)} records across {len(sites)} sites")
 
-        # Step 4: Return JSON or CSV
-        if fmt == "csv" and all_records:
-            output = self._records_to_csv(all_records)
+        # Step 4: Persist to SQLite
+        df = datetime.fromtimestamp(date_from).isoformat()
+        dt = datetime.fromtimestamp(date_to).isoformat()
+        if all_records:
+            try:
+                db_stats = save_update_records(
+                    all_records, df, dt, days, len(sites))
+                add_log("DB", "ok",
+                        f"Saved to DB — {db_stats['new']} new, "
+                        f"{db_stats['duplicate']} already stored")
+            except Exception as e:
+                add_log("DB", "warn", f"DB save failed: {e}")
+
+        # Step 5: Return JSON or CSV
+        if fmt == "csv":
+            # Export from DB so CSV always has the full archive, not just this fetch
+            try:
+                db_records = get_update_history(days=days)
+                output = self._records_to_csv(db_records)
+                filename = f"update-history-{days}d.csv"
+            except Exception:
+                output = self._records_to_csv(all_records)
+                filename = f"update-history-{days}d-live.csv"
             self.send_response(200)
             self.send_header("Content-Type", "text/csv; charset=utf-8")
             self.send_header("Content-Disposition",
-                             f"attachment; filename=update-history-{days}d.csv")
+                             f"attachment; filename={filename}")
             self.end_headers()
             self.wfile.write(output.encode("utf-8"))
         else:
             self._json_response({
                 "days": days,
-                "date_from": datetime.fromtimestamp(date_from).isoformat(),
-                "date_to": datetime.fromtimestamp(date_to).isoformat(),
+                "date_from": df,
+                "date_to": dt,
                 "total_records": len(all_records),
                 "sites_queried": len(sites),
                 "records": all_records,
             })
+
+    def _serve_cached_history(self, parsed):
+        """Return stored update history from SQLite — no MainWP API call needed."""
+        qs = parse_qs(parsed.query)
+        days = int(qs.get("days", [0])[0])       # 0 = all time
+        fmt = qs.get("format", ["json"])[0]
+        update_type = qs.get("type", ["all"])[0]
+        site_id = qs.get("site_id", [None])[0]
+
+        try:
+            records = get_update_history(
+                days=days if days else None,
+                update_type=update_type if update_type != "all" else None,
+                site_id=site_id,
+            )
+            if fmt == "csv":
+                output = self._records_to_csv(records)
+                label = f"{days}d" if days else "all"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition",
+                                 f"attachment; filename=update-history-{label}.csv")
+                self.end_headers()
+                self.wfile.write(output.encode("utf-8"))
+            else:
+                self._json_response({
+                    "source": "cache",
+                    "days": days,
+                    "total_records": len(records),
+                    "records": records,
+                })
+        except Exception as e:
+            add_log("DB", "error", f"Cached history query failed: {e}")
+            self._json_response({"error": str(e)}, 500)
+
+    def _serve_db_stats(self):
+        """Return summary stats about what's in the SQLite DB."""
+        try:
+            stats = get_history_stats()
+            self._json_response(stats)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
 
     def _records_to_csv(self, records):
         """Convert update history records to CSV string."""
@@ -855,6 +931,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 def main():
     global _passphrase
+
+    # Initialize SQLite DB (creates file + tables if not present)
+    try:
+        init_db()
+        stats = get_history_stats()
+        if stats["total_records"]:
+            add_log("DB", "ok",
+                    f"Database ready — {stats['total_records']} update records "
+                    f"({stats['unique_sites']} sites, "
+                    f"oldest: {(stats['oldest_record'] or '')[:10]})")
+        else:
+            add_log("DB", "info", "Database ready — no records yet")
+    except Exception as e:
+        add_log("DB", "warn", f"DB init failed: {e}")
 
     # Try auto-unlock from saved session
     saved_pass = load_session()

@@ -25,6 +25,27 @@ python3 server.py
 
 ---
 
+## SQLite Database
+
+**File:** `dashboard.db` (created automatically next to `server.py`)
+
+**Tables:**
+- `update_history` — every plugin/theme/WP update fetched from Pro Reports
+- `fetch_log` — metadata for each fetch run (when, how many records, how many new)
+- `sites_cache` — snapshot of MainWP site info (refreshed on each sites fetch)
+
+**Inspect directly:**
+```bash
+cd ~/DEV/wsp-dashboard
+sqlite3 dashboard.db
+.tables
+SELECT COUNT(*), MIN(updated_utime), MAX(updated_utime) FROM update_history;
+SELECT site_name, COUNT(*) AS updates FROM update_history GROUP BY site_name ORDER BY updates DESC;
+.quit
+```
+
+---
+
 ## API Keys — Where to Find Them
 
 | Service       | Where                                                          | Notes                              |
@@ -51,8 +72,10 @@ python3 server.py
 | `/api/mainwp/updates`                 | GET    | Proxy: MainWP pending updates      |
 | `/api/mainwp/raw/{path}`              | GET    | Proxy: any MainWP v2 endpoint      |
 | `/api/mainwp/routes`                  | GET    | Discover all MainWP REST routes    |
-| `/api/mainwp/update-history`          | GET    | Pro Reports update history (JSON)  |
-| `/api/mainwp/update-history?format=csv` | GET  | Pro Reports update history (CSV)   |
+| `/api/mainwp/update-history`          | GET    | Fetch live update history from Pro Reports (saves to DB) |
+| `/api/mainwp/update-history/cached`   | GET    | Load stored update history from SQLite (no API call) |
+| `/api/mainwp/update-history/cached?format=csv` | GET | Export cached history as CSV |
+| `/api/db/stats`                       | GET    | SQLite stats: record count, date range, last fetch |
 | `/api/logs`                           | GET    | Server log entries                 |
 | `/api/export`                         | GET    | Export encrypted config (base64)   |
 | `/api/import`                         | POST   | Import encrypted config            |

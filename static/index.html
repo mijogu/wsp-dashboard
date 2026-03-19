@@ -477,9 +477,16 @@
                         <option value="wordpress">WordPress</option>
                     </select>
                 </div>
-                <button class="btn btn-primary" id="historyFetchBtn">Fetch History</button>
+                <button class="btn btn-primary" id="historyFetchBtn">Fetch from MainWP</button>
+                <button class="btn" id="historyCachedBtn">Load Cached</button>
                 <button class="btn" id="historyExportBtn" style="display:none;">Export CSV</button>
                 <span id="historyStatus" style="font-size:12px; color:var(--text-muted);"></span>
+            </div>
+            <div id="dbStatsBar" style="display:none; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:10px 16px; margin-bottom:16px; font-size:12px; color:var(--text-muted); display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
+                <span>📦 <strong id="dbStatTotal">—</strong> records stored</span>
+                <span>🌐 <strong id="dbStatSites">—</strong> sites</span>
+                <span>📅 Since <strong id="dbStatOldest">—</strong></span>
+                <span>🔄 Last fetch: <strong id="dbStatFetch">—</strong></span>
             </div>
             <div class="log-table-wrap">
                 <table class="log-table" id="historyTable">
@@ -704,6 +711,7 @@
                     appState.unlocked = true;
                     await loadAllData();
                     startAutoRefresh();
+                    loadDbStats();
                     return;
                 }
 
@@ -758,6 +766,7 @@
                     hidePassphraseModal();
                     await loadAllData();
                     startAutoRefresh();
+                    loadDbStats();
                 }
             } catch (error) {
                 document.getElementById('passphraseError').textContent = 'Error unlocking dashboard';
@@ -967,6 +976,7 @@
             document.getElementById(tabName).classList.add('active');
 
             appState.currentTab = tabName;
+            if (tabName === 'history') loadDbStats();
         }
 
         // ============================================================================
@@ -1636,9 +1646,61 @@
 
         document.getElementById('historyExportBtn').addEventListener('click', () => {
             const days = document.getElementById('historyDays').value;
-            // Trigger CSV download via the server
-            window.open(`/api/mainwp/update-history?days=${days}&format=csv`, '_blank');
+            const type = document.getElementById('historyType').value;
+            // Export from DB cache (full archive, not just current view)
+            const params = new URLSearchParams({ format: 'csv' });
+            if (days) params.set('days', days);
+            if (type !== 'all') params.set('type', type);
+            window.open(`/api/mainwp/update-history/cached?${params}`, '_blank');
         });
+
+        document.getElementById('historyCachedBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('historyCachedBtn');
+            const status = document.getElementById('historyStatus');
+            const days = document.getElementById('historyDays').value;
+
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            status.textContent = 'Reading from local database...';
+
+            try {
+                const data = await apiCall(`/mainwp/update-history/cached?days=${days}`);
+                historyData = data.records || [];
+                if (historyData.length) {
+                    status.textContent = `${data.total_records} records loaded from local DB`;
+                    document.getElementById('historyExportBtn').style.display = '';
+                    renderHistory();
+                } else {
+                    status.textContent = 'No cached records for this period — try "Fetch from MainWP" first.';
+                }
+            } catch (e) {
+                status.textContent = `Error: ${e.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Load Cached';
+            }
+        });
+
+        async function loadDbStats() {
+            try {
+                const stats = await apiCall('/db/stats');
+                const bar = document.getElementById('dbStatsBar');
+                if (stats.total_records > 0) {
+                    bar.style.display = 'flex';
+                    document.getElementById('dbStatTotal').textContent =
+                        stats.total_records.toLocaleString();
+                    document.getElementById('dbStatSites').textContent =
+                        stats.unique_sites;
+                    document.getElementById('dbStatOldest').textContent =
+                        stats.oldest_record
+                            ? stats.oldest_record.slice(0, 10) : '—';
+                    const lf = stats.last_fetch;
+                    document.getElementById('dbStatFetch').textContent = lf
+                        ? `${lf.fetched_at.slice(0, 16).replace('T', ' ')} (+${lf.records_new} new)`
+                        : '—';
+                }
+            } catch (e) { /* silently skip */ }
+        }
 
         function renderHistory() {
             const typeFilter = document.getElementById('historyType').value;
