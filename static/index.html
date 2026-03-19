@@ -712,6 +712,7 @@
                     await loadAllData();
                     startAutoRefresh();
                     loadDbStats();
+                    loadCachedHistory(true);
                     return;
                 }
 
@@ -767,6 +768,7 @@
                     await loadAllData();
                     startAutoRefresh();
                     loadDbStats();
+                    loadCachedHistory(true);
                 }
             } catch (error) {
                 document.getElementById('passphraseError').textContent = 'Error unlocking dashboard';
@@ -976,7 +978,11 @@
             document.getElementById(tabName).classList.add('active');
 
             appState.currentTab = tabName;
-            if (tabName === 'history') loadDbStats();
+            if (tabName === 'history') {
+                loadDbStats();
+                // Only auto-load if the table is empty — don't clobber an active fetch
+                if (!historyData.length) loadCachedHistory(true);
+            }
         }
 
         // ============================================================================
@@ -1654,32 +1660,39 @@
             window.open(`/api/mainwp/update-history/cached?${params}`, '_blank');
         });
 
-        document.getElementById('historyCachedBtn').addEventListener('click', async () => {
+        // Shared function — called by button, tab switch, and startup
+        async function loadCachedHistory(silent = false) {
             const btn = document.getElementById('historyCachedBtn');
             const status = document.getElementById('historyStatus');
             const days = document.getElementById('historyDays').value;
 
-            btn.disabled = true;
-            btn.textContent = 'Loading...';
-            status.textContent = 'Reading from local database...';
+            if (!silent) {
+                btn.disabled = true;
+                btn.textContent = 'Loading...';
+                status.textContent = 'Reading from local database...';
+            }
 
             try {
                 const data = await apiCall(`/mainwp/update-history/cached?days=${days}`);
                 historyData = data.records || [];
                 if (historyData.length) {
-                    status.textContent = `${data.total_records} records loaded from local DB`;
+                    if (!silent) {
+                        status.textContent = `${data.total_records} records loaded from local DB`;
+                    }
                     document.getElementById('historyExportBtn').style.display = '';
                     renderHistory();
-                } else {
-                    status.textContent = 'No cached records for this period — try "Fetch from MainWP" first.';
+                } else if (!silent) {
+                    status.textContent = 'No cached records yet — use "Fetch from MainWP" to populate.';
                 }
             } catch (e) {
-                status.textContent = `Error: ${e.message}`;
+                if (!silent) status.textContent = `Error: ${e.message}`;
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Load Cached';
             }
-        });
+        }
+
+        document.getElementById('historyCachedBtn').addEventListener('click', () => loadCachedHistory(false));
 
         async function loadDbStats() {
             try {
@@ -1702,12 +1715,25 @@
             } catch (e) { /* silently skip */ }
         }
 
+        // Normalize a record so field names work regardless of source
+        // Live fetch uses _site_name/_update_type; DB uses site_name/update_type
+        function normalizeRecord(r) {
+            return {
+                ...r,
+                _site_name:   r._site_name   || r.site_name   || '—',
+                _site_url:    r._site_url     || r.site_url    || '',
+                _update_type: r._update_type  || r.update_type || '',
+                // DB stores new_version as new_version; live fetch uses current_version
+                current_version: r.current_version || r.new_version || '',
+            };
+        }
+
         function renderHistory() {
             const typeFilter = document.getElementById('historyType').value;
             const tbody = document.getElementById('historyBody');
             const empty = document.getElementById('historyEmpty');
 
-            let records = historyData;
+            let records = historyData.map(normalizeRecord);
             if (typeFilter !== 'all') {
                 records = records.filter(r => r._update_type === typeFilter);
             }
