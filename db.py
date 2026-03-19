@@ -127,7 +127,7 @@ def save_update_records(records: list, date_from: str, date_to: str,
         raw = {k: v for k, v in rec.items() if not k.startswith("_")}
 
         try:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO update_history "
                 "(site_id, site_name, site_url, update_type, name, old_version, "
                 " new_version, updated_date, updated_time, updated_utime, "
@@ -138,7 +138,8 @@ def save_update_records(records: list, date_from: str, date_to: str,
                  new_version, updated_date, updated_time, updated_utime,
                  updated_author, updated_slug, json.dumps(raw), fetch_id)
             )
-            if conn.total_changes:
+            # rowcount is 1 if the row was inserted, 0 if DO NOTHING fired
+            if cur.rowcount == 1:
                 new_count += 1
             else:
                 dup_count += 1
