@@ -315,7 +315,7 @@
         .log-time { color: var(--text-muted); flex-shrink: 0; width: 60px; }
         .log-source { flex-shrink: 0; width: 100px; font-weight: 500; }
         .log-msg { flex: 1; word-break: break-word; white-space: pre-wrap; }
-        .log-msg.truncated { cursor: pointer; }
+        .log-msg.truncated { cursor: pointer; white-space: normal; }
         .log-msg .expand-hint {
             color: var(--accent);
             font-size: 11px;
@@ -330,14 +330,14 @@
             background: var(--bg);
             border: 1px solid var(--border);
             border-radius: 4px;
-            padding: 6px 8px;
-            margin-top: 4px;
-            max-height: 400px;
+            padding: 3px 6px;
+            margin-top: 2px;
+            max-height: 300px;
             overflow-y: auto;
             white-space: pre-wrap;
             word-break: break-all;
             font-size: 11px;
-            line-height: 1.4;
+            line-height: 1.35;
         }
         .log-msg.expanded .expand-hint { display: none; }
         .log-entry.ok .log-source { color: var(--green); }
@@ -346,7 +346,7 @@
         .log-entry.error .log-source { color: var(--red); }
         .log-entry.error .log-msg { color: var(--red); }
         .log-detail {
-            padding: 1px 16px 4px 186px;
+            padding: 1px 16px 3px 170px;
             font-size: 11px;
             color: var(--text-muted);
             word-break: break-all;
@@ -1638,10 +1638,7 @@
                         }
                     } catch(e) { /* not JSON, use raw */ }
 
-                    msgHtml = `<span class="log-msg truncated" data-idx="${i}" onclick="this.classList.toggle('expanded')">
-                        <span class="short-text">${short}<span class="expand-hint">[expand]</span></span>
-                        <span class="full-text">${prettyFull}</span>
-                    </span>`;
+                    msgHtml = `<span class="log-msg truncated" data-idx="${i}" onclick="this.classList.toggle('expanded')"><span class="short-text">${short}<span class="expand-hint">[expand]</span></span><span class="full-text">${prettyFull}</span></span>`;
                 } else {
                     msgHtml = `<span class="log-msg">${escapeHtml(msg)}</span>`;
                 }
@@ -1670,8 +1667,31 @@
             return div.innerHTML;
         }
 
-        // Poll for logs every 2 seconds
-        setInterval(fetchLogs, 2000);
+        // ── Log polling with mousedown-pause / mouseup-resume (5s delay) ────────
+        let _logPaused = false;
+        let _logResumeTimer = null;
+
+        const _logBody = document.getElementById('logBody');
+        const _logPausedBadge = document.getElementById('logPausedBadge');
+
+        _logBody.addEventListener('mousedown', () => {
+            _logPaused = true;
+            if (_logResumeTimer) { clearTimeout(_logResumeTimer); _logResumeTimer = null; }
+            _logPausedBadge.style.display = '';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!_logPaused) return;
+            if (_logResumeTimer) clearTimeout(_logResumeTimer);
+            _logResumeTimer = setTimeout(() => {
+                _logPaused = false;
+                _logResumeTimer = null;
+                _logPausedBadge.style.display = 'none';
+                fetchLogs(); // immediate refresh on resume
+            }, 5000);
+        });
+
+        setInterval(() => { if (!_logPaused) fetchLogs(); }, 2000);
 
         // ============================================================================
         // Update History Tab
@@ -2036,6 +2056,7 @@
             <div class="log-header-left">
                 <h3>Server Log</h3>
                 <span id="logCount" class="log-count">0</span>
+                <span id="logPausedBadge" style="display:none; font-size:10px; color:var(--yellow); letter-spacing:0.3px;">⏸ paused</span>
             </div>
             <span id="logToggle" class="log-toggle">Collapse</span>
         </div>
