@@ -425,6 +425,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._json_response({"error": "MainWP not configured"}, 400)
             return
 
+        auth_headers = {"Authorization": f"Bearer {api_key}"}
+        json_headers = {**auth_headers, "Content-Type": "application/json"}
+
         qs = parse_qs(parsed.query)
         fmt = qs.get("format", ["json"])[0]
         filter_site = qs.get("site_id", [None])[0]
