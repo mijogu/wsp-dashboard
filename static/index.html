@@ -67,6 +67,23 @@
         .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
         .btn-primary:hover { opacity: 0.9; }
 
+        /* Sortable table headers */
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        th.sortable:hover { color: var(--text); }
+        th.sortable .sort-arrow {
+            display: inline-block;
+            margin-left: 4px;
+            font-size: 10px;
+            opacity: 0.35;
+            transition: opacity 0.1s;
+        }
+        th.sortable.sort-asc .sort-arrow,
+        th.sortable.sort-desc .sort-arrow { opacity: 1; color: var(--accent); }
+
         /* Filter bar pills */
         .pill {
             padding: 4px 12px;
@@ -547,12 +564,12 @@
                 <table class="log-table" id="historyTable">
                     <thead>
                         <tr>
-                            <th>Site</th>
-                            <th>Type</th>
-                            <th>Name</th>
-                            <th>Old Version</th>
-                            <th>New Version</th>
-                            <th>Date</th>
+                            <th class="sortable" data-col="site">Site <span class="sort-arrow">⇅</span></th>
+                            <th class="sortable" data-col="type">Type <span class="sort-arrow">⇅</span></th>
+                            <th class="sortable" data-col="name">Name <span class="sort-arrow">⇅</span></th>
+                            <th class="sortable" data-col="old_version">Old Version <span class="sort-arrow">⇅</span></th>
+                            <th class="sortable" data-col="new_version">New Version <span class="sort-arrow">⇅</span></th>
+                            <th class="sortable sort-desc" data-col="date">Date <span class="sort-arrow">↓</span></th>
                         </tr>
                     </thead>
                     <tbody id="historyBody"></tbody>
@@ -1927,6 +1944,31 @@
             };
         }
 
+        // ── Column sort state ─────────────────────────────────────────────────────
+        let _sortCol = 'date';
+        let _sortDir = 'desc'; // 'asc' | 'desc'
+
+        // Wire sortable header clicks (elements exist above <script> tag)
+        document.querySelectorAll('#historyTable thead th.sortable').forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.col;
+                if (_sortCol === col) {
+                    _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    _sortCol = col;
+                    _sortDir = col === 'date' ? 'desc' : 'asc';
+                }
+                // Update header classes + arrow glyphs
+                document.querySelectorAll('#historyTable thead th.sortable').forEach(h => {
+                    h.classList.remove('sort-asc', 'sort-desc');
+                    h.querySelector('.sort-arrow').textContent = '⇅';
+                });
+                th.classList.add(_sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+                th.querySelector('.sort-arrow').textContent = _sortDir === 'asc' ? '↑' : '↓';
+                renderHistory();
+            });
+        });
+
         function renderHistory() {
             const tbody  = document.getElementById('historyBody');
             const empty  = document.getElementById('historyEmpty');
@@ -1988,11 +2030,38 @@
             }
             empty.style.display = 'none';
 
-            // Sort by date descending
+            // Sort by active column
             records.sort((a, b) => {
-                const aVal = a.updated_utime || a.updated_date || '';
-                const bVal = b.updated_utime || b.updated_date || '';
-                return String(bVal).localeCompare(String(aVal));
+                let aVal, bVal;
+                switch (_sortCol) {
+                    case 'site':
+                        aVal = (a._site_name || '').toLowerCase();
+                        bVal = (b._site_name || '').toLowerCase();
+                        break;
+                    case 'type':
+                        aVal = a._update_type || '';
+                        bVal = b._update_type || '';
+                        break;
+                    case 'name':
+                        aVal = (a.name || a.title || a.slug || '').toLowerCase();
+                        bVal = (b.name || b.title || b.slug || '').toLowerCase();
+                        break;
+                    case 'old_version':
+                        aVal = a.old_version || '';
+                        bVal = b.old_version || '';
+                        break;
+                    case 'new_version':
+                        aVal = a.current_version || a.new_version || '';
+                        bVal = b.current_version || b.new_version || '';
+                        break;
+                    case 'date':
+                    default:
+                        aVal = a.updated_utime || a.updated_date || '';
+                        bVal = b.updated_utime || b.updated_date || '';
+                        break;
+                }
+                const cmp = String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
+                return _sortDir === 'asc' ? cmp : -cmp;
             });
 
             const typeColors = {
