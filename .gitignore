@@ -14,3 +14,23 @@ config.enc
 
 # Session file for auto-unlock (contains obfuscated passphrase)
 .session
+
+# SQLite database — runtime data, contains client info
+dashboard.db
+dashboard.db-shm
+dashboard.db-wal
+
+# Database backups — large binaries, keep locally only
+dashboard-*.db
+
+# Regression screenshots and diff images — runtime-generated, can be large
+screenshots/
+
+# Scratch / debug files
+samplejson.json
+
+# macOS
+.DS_Store
+
+# Claude Code session data (plans, worktrees) — CLAUDE.md at root is tracked separately
+.claude/
