@@ -295,6 +295,21 @@
         }
         .log-panel.collapsed { height: 36px; }
         .log-panel.expanded { height: 280px; }
+        .log-panel.resizing { transition: none; }
+        .log-resize-handle {
+            position: absolute;
+            top: -4px;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: ns-resize;
+            z-index: 151;
+        }
+        .log-resize-handle:hover,
+        .log-panel.resizing .log-resize-handle {
+            background: var(--accent);
+            opacity: 0.35;
+        }
         .log-header {
             display: flex;
             align-items: center;
@@ -378,6 +393,137 @@
             .sites-grid, .cf-grid { grid-template-columns: 1fr; }
             .stats-row { grid-template-columns: repeat(2, 1fr); }
         }
+
+        /* ── Site Config Slide-out Panel ──────────────────────────── */
+        .site-panel-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 300;
+        }
+        .site-panel-backdrop.open { display: block; }
+
+        .site-panel {
+            position: fixed;
+            top: 0; right: 0;
+            width: 400px;
+            max-width: 100vw;
+            height: 100vh;
+            background: var(--surface);
+            border-left: 1px solid var(--border);
+            z-index: 301;
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.22s cubic-bezier(.4,0,.2,1);
+            overflow: hidden;
+        }
+        .site-panel.open { transform: translateX(0); }
+
+        .site-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 18px 20px 14px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .site-panel-header button {
+            background: none; border: none; color: var(--text-muted);
+            font-size: 20px; cursor: pointer; padding: 0; line-height: 1;
+        }
+        .site-panel-header button:hover { color: var(--text); }
+        .site-panel-title { font-size: 14px; font-weight: 600; }
+        .site-panel-url { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+        .site-panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .site-panel-footer {
+            padding: 14px 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .field-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .field-input {
+            width: 100%;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 13px;
+            padding: 8px 10px;
+        }
+        .field-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        textarea.field-input { resize: vertical; min-height: 72px; font-family: inherit; }
+
+        .page-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .page-row .field-input { flex: 1; }
+        .page-remove-btn {
+            background: none; border: none;
+            color: var(--text-muted); font-size: 16px;
+            cursor: pointer; padding: 4px; line-height: 1; flex-shrink: 0;
+        }
+        .page-remove-btn:hover { color: var(--red); }
+        .add-page-btn {
+            background: none;
+            border: 1px dashed var(--border);
+            border-radius: 6px;
+            color: var(--text-muted);
+            font-size: 12px;
+            padding: 7px 12px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 4px;
+            transition: all 0.15s;
+        }
+        .add-page-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* Sites table */
+        .sites-config-table { width: 100%; border-collapse: collapse; }
+        .sites-config-table th {
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            padding: 0 12px 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .sites-config-table td {
+            padding: 10px 12px;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+        .sites-config-table tr:last-child td { border-bottom: none; }
+        .sites-config-table tr:hover td { background: var(--surface-2); }
     </style>
 </head>
 <body>
@@ -411,6 +557,8 @@
             <button class="tab" data-tab="mainwp">MainWP</button>
             <button class="tab" data-tab="history">Update History</button>
             <button class="tab" data-tab="downtime">Downtime Log</button>
+            <button class="tab" data-tab="regression">Regression</button>
+            <button class="tab" data-tab="sites">Sites</button>
         </div>
 
         <!-- Overview Tab -->
@@ -505,7 +653,6 @@
                 <span id="historySyncInfo" style="font-size:12px; color:var(--text-muted); line-height:1.4;"></span>
                 <div style="flex:1;"></div>
                 <button class="btn" id="historyBackfillToggle" style="font-size:12px; padding:5px 12px;">↩ Backfill</button>
-                <button class="btn" id="historyExportBtn" style="display:none;">⬇ Export CSV</button>
             </div>
             <!-- Status line -->
             <div style="min-height:18px; margin-bottom:10px;">
@@ -555,9 +702,10 @@
                     <input type="date" id="filterDateFrom" class="filter-input" title="From date">
                     <span style="font-size:12px; color:var(--text-muted);">→</span>
                     <input type="date" id="filterDateTo" class="filter-input" title="To date">
-                    <!-- Clear + result count -->
+                    <!-- Clear, Export + result count -->
                     <button class="btn" id="filterClearBtn" style="font-size:12px; padding:5px 10px; flex-shrink:0;">✕ Clear</button>
-                    <span id="filterCount" style="font-size:12px; color:var(--text-muted); flex-shrink:0;"></span>
+                    <button class="btn" id="historyExportBtn" style="font-size:12px; padding:5px 10px; flex-shrink:0;">⬇ Export CSV</button>
+                    <span id="filterCount" style="font-size:12px; color:var(--text-muted); flex-shrink:0; margin-left:auto;"></span>
                 </div>
             </div>
             <div class="log-table-wrap">
@@ -596,6 +744,211 @@
                     <tbody id="downtimeBody"></tbody>
                 </table>
             </div>
+        </div>
+
+        <!-- Regression Tab -->
+        <div id="regression" class="tab-content">
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+                <button class="btn btn-primary" id="regressionRunBtn">▶ Run Site Check</button>
+                <button class="btn" id="regressionCancelBtn" style="display:none; background:var(--red-bg); border-color:var(--red); color:var(--red);">✕ Cancel</button>
+                <button class="btn" id="regressionSiteSelectBtn" style="font-size:12px; padding:5px 12px;">☰ Sites <span id="regressionSiteCount" style="opacity:0.6;"></span></button>
+                <span id="regressionStatus" style="font-size:12px; color:var(--text-muted);"></span>
+                <div style="flex:1;"></div>
+                <button class="btn" id="regressionDeleteBtn" style="display:none; font-size:12px; padding:5px 10px; color:var(--red); border-color:var(--red); background:transparent;" title="Delete this run">🗑 Delete Run</button>
+                <select id="regressionRunSelect" class="filter-input" style="min-width:200px; max-width:300px; font-size:12px; display:none;">
+                    <option value="latest">Latest run</option>
+                </select>
+                <span id="regressionRunInfo" style="font-size:12px; color:var(--text-muted);"></span>
+            </div>
+
+            <!-- Progress bar (shown during a run) -->
+            <div id="regressionProgress" style="display:none; margin-bottom:14px;">
+                <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); margin-bottom:4px;">
+                    <span id="regressionProgressLabel">Checking sites...</span>
+                    <span id="regressionProgressCount">0 / 0</span>
+                </div>
+                <div style="height:6px; background:var(--surface-2); border-radius:3px; overflow:hidden;">
+                    <div id="regressionProgressBar" style="height:100%; background:var(--accent); width:0%; transition:width 0.3s; border-radius:3px;"></div>
+                </div>
+            </div>
+
+            <!-- Not-available banner -->
+            <div id="regressionUnavailable" class="empty-state" style="display:none;">
+                <p>Playwright is not installed. To enable regression testing, run:</p>
+                <code style="display:block; background:var(--surface-2); padding:10px 14px; border-radius:6px; font-size:13px; margin-top:8px;">
+                    pip install playwright && playwright install chromium
+                </code>
+            </div>
+
+            <!-- Summary cards -->
+            <div id="regressionSummary" style="display:none; margin-bottom:16px;">
+                <div class="stats-row" style="grid-template-columns: repeat(4, 1fr);">
+                    <div class="stat-card">
+                        <div class="stat-value" id="regStatTotal">—</div>
+                        <div class="stat-label">Sites Checked</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color:var(--green);" id="regStatClean">—</div>
+                        <div class="stat-label">Clean</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color:var(--yellow);" id="regStatIssues">—</div>
+                        <div class="stat-label">Issues Found</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="regStatAvgLoad">—</div>
+                        <div class="stat-label">Avg Load Time</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results table -->
+            <div class="log-table-wrap">
+                <table class="log-table" id="regressionTable">
+                    <thead>
+                        <tr>
+                            <th style="width:40px;">Status</th>
+                            <th>Site</th>
+                            <th>HTTP</th>
+                            <th>Load Time</th>
+                            <th>JS Errors</th>
+                            <th>Broken Resources</th>
+                            <th style="width:80px;">Screenshot</th>
+                            <th style="width:90px;">Visual Diff</th>
+                        </tr>
+                    </thead>
+                    <tbody id="regressionBody"></tbody>
+                </table>
+                <div id="regressionEmpty" class="empty-state">
+                    No regression results yet. Click "Run Site Check" to scan all sites.
+                </div>
+            </div>
+
+            <!-- Site selector modal -->
+            <div id="siteSelectOverlay" class="modal-overlay" style="z-index:240;">
+                <div class="modal" style="max-width:480px; width:90vw; padding:0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border);">
+                        <h3 style="font-size:14px; font-weight:600;">Select Sites to Check</h3>
+                        <button class="btn" id="siteSelectCloseBtn" style="font-size:12px; padding:4px 10px;">✕</button>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:10px; padding:10px 18px; border-bottom:1px solid var(--border); background:var(--surface-2);">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; font-weight:500;">
+                            <input type="checkbox" id="siteSelectAll" checked style="accent-color:var(--accent); width:15px; height:15px; cursor:pointer;">
+                            Select All
+                        </label>
+                        <div style="flex:1;"></div>
+                        <span id="siteSelectCount" style="font-size:12px; color:var(--text-muted);"></span>
+                    </div>
+                    <div id="siteSelectList" style="max-height:400px; overflow-y:auto; padding:6px 0;"></div>
+                    <div style="padding:12px 18px; border-top:1px solid var(--border); text-align:right;">
+                        <button class="btn btn-primary" id="siteSelectDoneBtn" style="font-size:13px; padding:6px 20px;">Done</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Screenshot modal — override overlay to scroll, top-align, and not clip tall images -->
+            <div id="screenshotOverlay" class="modal-overlay" style="z-index:250; align-items:flex-start; overflow-y:auto; padding:40px 0;">
+                <div class="modal" style="max-width:900px; width:90vw; padding:10px; margin:0 auto;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; position:sticky; top:0; background:var(--surface); z-index:1; border-radius:10px 10px 0 0;">
+                        <h3 id="screenshotTitle" style="font-size:14px; font-weight:600;">Screenshot</h3>
+                        <button class="btn" id="screenshotCloseBtn" style="font-size:12px; padding:4px 10px;">✕ Close</button>
+                    </div>
+                    <img id="screenshotImg" style="width:100%; border-radius:0 0 6px 6px; border:1px solid var(--border);" src="" alt="Screenshot">
+                </div>
+            </div>
+
+            <!-- Visual diff comparison viewer -->
+            <div id="diffOverlay" class="modal-overlay" style="z-index:260; align-items:flex-start; overflow-y:auto; padding:30px 0;">
+                <div class="modal" style="max-width:1200px; width:95vw; padding:10px; margin:0 auto;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; position:sticky; top:0; background:var(--surface); z-index:1; border-radius:10px 10px 0 0; border-bottom:1px solid var(--border);">
+                        <div>
+                            <h3 id="diffTitle" style="font-size:14px; font-weight:600; margin:0;">Visual Diff</h3>
+                            <div id="diffSubtitle" style="font-size:11px; color:var(--text-muted); margin-top:2px;"></div>
+                        </div>
+                        <button class="btn" id="diffCloseBtn" style="font-size:12px; padding:4px 10px;">✕ Close</button>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:10px;">
+                        <div>
+                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Baseline</div>
+                            <img id="diffBaselineImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Baseline">
+                        </div>
+                        <div>
+                            <div style="font-size:11px; font-weight:600; color:var(--yellow); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Diff (red = changed)</div>
+                            <img id="diffDiffImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Diff">
+                        </div>
+                        <div>
+                            <div style="font-size:11px; font-weight:600; color:var(--accent); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Current</div>
+                            <img id="diffCurrentImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Current">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Sites Tab -->
+        <div id="sites" class="tab-content">
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                <span id="sitesStatus" style="font-size:12px; color:var(--text-muted);"></span>
+            </div>
+            <div id="sitesEmpty" class="empty-state" style="display:none;">
+                <p>No sites in cache yet — refresh MainWP data to populate the site list.</p>
+            </div>
+            <table class="sites-config-table" id="sitesTable" style="display:none;">
+                <thead>
+                    <tr>
+                        <th>Site</th>
+                        <th>Client</th>
+                        <th style="text-align:center;">Pages</th>
+                        <th>Notes</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="sitesBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Site Config Slide-out Panel -->
+    <div id="sitePanelBackdrop" class="site-panel-backdrop"></div>
+    <div id="sitePanel" class="site-panel" role="dialog" aria-modal="true">
+        <div class="site-panel-header">
+            <button id="sitePanelCloseBtn" aria-label="Close">&#x2190;</button>
+            <div>
+                <div class="site-panel-title" id="sitePanelName">Site Configuration</div>
+                <div class="site-panel-url" id="sitePanelUrl"></div>
+            </div>
+        </div>
+        <div class="site-panel-body">
+            <div>
+                <div class="field-label">Client Name</div>
+                <input type="text" class="field-input" id="siteConfigClient"
+                       placeholder="e.g. Acme Corp">
+            </div>
+            <div>
+                <div class="field-label">Notes</div>
+                <textarea class="field-input" id="siteConfigNotes"
+                          placeholder="e.g. SiteGround hosted — bot detection active on login page"></textarea>
+            </div>
+            <div>
+                <div class="field-label">Visual Diff Threshold (%)</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+                    Flag a run as changed when pixel diff exceeds this percentage. Default is 1%. Raise for sites with animations or rotating content.
+                </div>
+                <input type="number" class="field-input" id="siteConfigDiffThreshold"
+                       min="0" max="100" step="0.1" placeholder="1.0"
+                       style="width:100px;">
+            </div>
+            <div>
+                <div class="field-label">Test Pages</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">
+                    URLs checked during regression runs. The homepage is always the default — add paths like <code style="background:var(--surface-2); padding:1px 5px; border-radius:3px;">/about</code> or full URLs for additional pages.
+                </div>
+                <div id="sitePagesList"></div>
+                <button class="add-page-btn" id="siteAddPageBtn">+ Add Page</button>
+            </div>
+        </div>
+        <div class="site-panel-footer">
+            <button class="btn" id="sitePanelCancelBtn">Cancel</button>
+            <button class="btn btn-primary" id="sitePanelSaveBtn">Save Changes</button>
         </div>
     </div>
 
@@ -785,6 +1138,9 @@
                     startAutoRefresh();
                     loadDbStats();
                     loadCachedHistory(true);
+                    checkRegressionAvailability();
+                    loadRegressionSiteList();
+                    loadRegressionResults();
                     return;
                 }
 
@@ -841,6 +1197,9 @@
                     startAutoRefresh();
                     loadDbStats();
                     loadCachedHistory(true);
+                    checkRegressionAvailability();
+                    loadRegressionSiteList();
+                    loadRegressionResults();
                 }
             } catch (error) {
                 document.getElementById('passphraseError').textContent = 'Error unlocking dashboard';
@@ -1055,6 +1414,7 @@
                 // Only auto-load if the table is empty — don't clobber an active fetch
                 if (!historyData.length) loadCachedHistory(true);
             }
+            if (tabName === 'sites' && !_sitesList.length) loadSitesTab();
         }
 
         // ============================================================================
@@ -1601,14 +1961,38 @@
         // ============================================================================
         // Log Panel
         // ============================================================================
-        let logPanelExpanded = true;
+        // Restore log panel state from localStorage
+        let _savedLogState = (() => {
+            try { return JSON.parse(localStorage.getItem('wsp_log_panel') || '{}'); } catch { return {}; }
+        })();
+        let logPanelExpanded = _savedLogState.expanded !== undefined ? _savedLogState.expanded : true;
         let lastLogCount = 0;
+        let _logCustomHeight = _savedLogState.height || null;
+
+        function _saveLogPanelState() {
+            try {
+                localStorage.setItem('wsp_log_panel', JSON.stringify({
+                    expanded: logPanelExpanded,
+                    height: _logCustomHeight,
+                }));
+            } catch { /* ignore */ }
+        }
 
         function toggleLogPanel() {
             const panel = document.getElementById('logPanel');
             logPanelExpanded = !logPanelExpanded;
-            panel.className = 'log-panel ' + (logPanelExpanded ? 'expanded' : 'collapsed');
+            panel.classList.remove('resizing');
+            if (logPanelExpanded) {
+                // Restore drag-set height if the user had resized, else class default
+                panel.className = 'log-panel expanded';
+                if (_logCustomHeight !== null) panel.style.height = _logCustomHeight + 'px';
+                else panel.style.height = '';
+            } else {
+                panel.style.height = '';
+                panel.className = 'log-panel collapsed';
+            }
             document.getElementById('logToggle').textContent = logPanelExpanded ? 'Collapse' : 'Expand';
+            _saveLogPanelState();
         }
 
         async function fetchLogs() {
@@ -1721,9 +2105,6 @@
                 await loadCachedHistory(true);
                 await loadDbStats();
 
-                if (historyData.length > 0) {
-                    document.getElementById('historyExportBtn').style.display = '';
-                }
             } catch (e) {
                 status.textContent = `Error: ${e.message}`;
                 console.error('History sync error:', e);
@@ -1737,14 +2118,27 @@
             runHistorySync(null, null); // let server decide dates (incremental)
         });
 
-        // ── Export CSV (respects active filters) ─────────────────────────────────
+        // ── Export CSV (always matches exactly what's shown in the table) ──────────
         document.getElementById('historyExportBtn').addEventListener('click', () => {
-            const f = getActiveFilters();
-            const p = new URLSearchParams({ format: 'csv' });
-            if (f.type)     p.set('type',    f.type);
-            if (f.site_id)  p.set('site_id', f.site_id);
-            // Date filters are client-side only, but we still export the full type/site slice
-            window.open(`/api/mainwp/update-history/cached?${p}`, '_blank');
+            if (!_filteredRecords.length) return;
+            const headers = ['Site', 'Type', 'Name', 'Old Version', 'New Version', 'Date'];
+            const escape  = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const rows = _filteredRecords.map(r => [
+                escape(r._site_name || ''),
+                escape(r._update_type || ''),
+                escape(r.name || r.title || r.slug || ''),
+                escape(r.old_version || ''),
+                escape(r.current_version || r.new_version || ''),
+                escape(formatDateOnly(r)),
+            ].join(','));
+            const csv  = [headers.join(','), ...rows].join('\r\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = `update-history-${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
         });
 
         // ── Backfill Panel ───────────────────────────────────────────────────────
@@ -1823,7 +2217,6 @@
                     if (!silent) {
                         status.textContent = `${data.total_records} records loaded from local DB`;
                     }
-                    document.getElementById('historyExportBtn').style.display = '';
                     renderHistory();
                 } else if (!silent) {
                     status.textContent = 'No cached records yet — click "Sync Updates" to fetch from MainWP.';
@@ -1947,6 +2340,7 @@
         // ── Column sort state ─────────────────────────────────────────────────────
         let _sortCol = 'date';
         let _sortDir = 'desc'; // 'asc' | 'desc'
+        let _filteredRecords = []; // always reflects what's currently shown in the table
 
         // Wire sortable header clicks (elements exist above <script> tag)
         document.querySelectorAll('#historyTable thead th.sortable').forEach(th => {
@@ -1968,6 +2362,30 @@
                 renderHistory();
             });
         });
+
+        // ── Date helpers ──────────────────────────────────────────────────────────
+        // updated_utime is "YYYY-MM-DD HH:MM:SS" — most reliable for sorting.
+        // updated_date is human-formatted and sometimes has a leading DOW.
+        function parseDateTs(rec) {
+            if (rec.updated_utime) {
+                const t = new Date(rec.updated_utime.replace(' ', 'T')).getTime();
+                if (!isNaN(t)) return t;
+            }
+            // Strip leading DOW ("Thursday, ") before parsing updated_date
+            const raw = (rec.updated_date || '').replace(/^[A-Za-z]+,\s*/, '');
+            if (raw) {
+                const t = new Date(raw).getTime();
+                if (!isNaN(t)) return t;
+            }
+            return 0;
+        }
+
+        function formatDateOnly(rec) {
+            const ts = parseDateTs(rec);
+            if (!ts) return rec.updated_date || '—';
+            return new Date(ts).toLocaleDateString('en-US',
+                { month: 'long', day: 'numeric', year: 'numeric' });
+        }
 
         function renderHistory() {
             const tbody  = document.getElementById('historyBody');
@@ -2005,22 +2423,22 @@
                 });
             }
             if (f.dateFrom) {
-                records = records.filter(r => {
-                    const d = (r.updated_date || r.updated_utime || '').slice(0, 10);
-                    return d >= f.dateFrom;
-                });
+                const fromTs = new Date(f.dateFrom).getTime(); // YYYY-MM-DD → midnight
+                records = records.filter(r => parseDateTs(r) >= fromTs);
             }
             if (f.dateTo) {
-                records = records.filter(r => {
-                    const d = (r.updated_date || r.updated_utime || '').slice(0, 10);
-                    return d <= f.dateTo;
-                });
+                // Include the entire "to" day by adding 1 day - 1ms
+                const toTs = new Date(f.dateTo).getTime() + 86400000 - 1;
+                records = records.filter(r => parseDateTs(r) <= toTs);
             }
 
             const total = historyData.length;
             countEl.textContent = records.length < total
                 ? `${records.length.toLocaleString()} of ${total.toLocaleString()}`
                 : `${total.toLocaleString()} records`;
+
+            // Snapshot what's visible so export always matches the table
+            _filteredRecords = records;
 
             if (!records.length) {
                 tbody.innerHTML = '';
@@ -2056,9 +2474,9 @@
                         break;
                     case 'date':
                     default:
-                        aVal = a.updated_utime || a.updated_date || '';
-                        bVal = b.updated_utime || b.updated_date || '';
-                        break;
+                        return _sortDir === 'asc'
+                            ? parseDateTs(a) - parseDateTs(b)
+                            : parseDateTs(b) - parseDateTs(a);
                 }
                 const cmp = String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
                 return _sortDir === 'asc' ? cmp : -cmp;
@@ -2075,9 +2493,7 @@
                 const name = rec.name || rec.title || rec.slug || '—';
                 const oldVer = rec.old_version || '—';
                 const newVer = rec.current_version || rec.new_version || '—';
-                const date = rec.updated_date
-                    ? `${rec.updated_date}${rec.updated_time ? ' ' + rec.updated_time : ''}`
-                    : (rec.updated_utime || '—');
+                const date = formatDateOnly(rec);
 
                 return `<tr>
                     <td>${escapeHtml(rec._site_name || '—')}</td>
@@ -2089,6 +2505,633 @@
                 </tr>`;
             }).join('');
         }
+
+        // ============================================================================
+        // Regression Tab
+        // ============================================================================
+        let _regressionPollTimer = null;
+
+        async function checkRegressionAvailability() {
+            try {
+                const resp = await fetch('/api/regression/status');
+                const data = await resp.json();
+                if (!data.available) {
+                    document.getElementById('regressionUnavailable').style.display = '';
+                    document.getElementById('regressionRunBtn').disabled = true;
+                    document.getElementById('regressionRunBtn').style.opacity = '0.4';
+                }
+                // If a run is in progress (e.g. page was reloaded mid-run), resume polling
+                if (data.active_run) {
+                    showRegressionProgress(data.active_run);
+                    startRegressionPolling();
+                }
+            } catch (e) {
+                // Ignore — server might not be running yet
+            }
+        }
+
+        async function startRegressionRun() {
+            const btn = document.getElementById('regressionRunBtn');
+            const status = document.getElementById('regressionStatus');
+
+            // Validate at least one site is selected
+            if (_regSiteList.length && _regSelectedIds.size === 0) {
+                status.textContent = 'No sites selected — click "Sites" to choose which sites to check.';
+                return;
+            }
+
+            btn.disabled = true;
+            status.textContent = 'Starting...';
+
+            // Send selected site IDs (empty array = all)
+            const body = {};
+            if (_regSiteList.length && _regSelectedIds.size < _regSiteList.length) {
+                body.site_ids = [..._regSelectedIds];
+            }
+
+            try {
+                const resp = await fetch('/api/regression/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json();
+                if (data.error) {
+                    status.textContent = data.error;
+                    btn.disabled = false;
+                    return;
+                }
+                status.textContent = '';
+                showRegressionProgress({ total: data.total_sites, checked: 0, issues_found: 0 });
+                startRegressionPolling();
+            } catch (e) {
+                status.textContent = `Error: ${e.message}`;
+                btn.disabled = false;
+            }
+        }
+
+        async function cancelRegressionRun() {
+            const btn = document.getElementById('regressionCancelBtn');
+            btn.disabled = true;
+            btn.textContent = 'Cancelling...';
+            try {
+                const resp = await fetch('/api/regression/cancel', { method: 'POST' });
+                const data = await resp.json();
+                if (data.error) {
+                    document.getElementById('regressionStatus').textContent = data.error;
+                }
+                // Polling will detect the run ended and clean up UI
+            } catch (e) {
+                document.getElementById('regressionStatus').textContent = `Cancel failed: ${e.message}`;
+            }
+        }
+
+        let _currentViewRunId = null; // tracks which run is displayed
+
+        async function deleteRegressionRun(runId) {
+            if (!runId) return;
+            if (!confirm('Delete this regression run and its screenshots?')) return;
+            try {
+                const resp = await fetch(`/api/regression/run/${runId}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.error) {
+                    document.getElementById('regressionStatus').textContent = data.error;
+                    return;
+                }
+                document.getElementById('regressionStatus').textContent = 'Run deleted.';
+                _currentViewRunId = null;
+                document.getElementById('regressionDeleteBtn').style.display = 'none';
+                // Reload the run list and show the latest remaining
+                await loadRegressionRuns();
+                const sel = document.getElementById('regressionRunSelect');
+                if (sel.options.length) {
+                    loadRegressionResults(sel.value);
+                } else {
+                    // No runs left
+                    document.getElementById('regressionBody').innerHTML = '';
+                    document.getElementById('regressionEmpty').style.display = '';
+                    document.getElementById('regressionSummary').style.display = 'none';
+                }
+            } catch (e) {
+                document.getElementById('regressionStatus').textContent = `Delete failed: ${e.message}`;
+            }
+        }
+
+        function showRegressionProgress(run) {
+            const prog = document.getElementById('regressionProgress');
+            prog.style.display = '';
+            document.getElementById('regressionRunBtn').style.display = 'none';
+            const cancelBtn = document.getElementById('regressionCancelBtn');
+            cancelBtn.style.display = '';
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = '✕ Cancel';
+            document.getElementById('regressionDeleteBtn').style.display = 'none';
+            updateRegressionProgress(run);
+        }
+
+        function updateRegressionProgress(run) {
+            const total = run.total || 1;
+            const checked = run.checked || 0;
+            const pct = Math.round((checked / total) * 100);
+            document.getElementById('regressionProgressBar').style.width = pct + '%';
+            document.getElementById('regressionProgressCount').textContent = `${checked} / ${total}`;
+            const label = run.current_site
+                ? `Checking: ${run.current_site}`
+                : 'Checking sites...';
+            document.getElementById('regressionProgressLabel').textContent = label;
+        }
+
+        function startRegressionPolling() {
+            if (_regressionPollTimer) clearInterval(_regressionPollTimer);
+            _regressionPollTimer = setInterval(pollRegressionStatus, 2000);
+        }
+
+        async function pollRegressionStatus() {
+            try {
+                const resp = await fetch('/api/regression/status');
+                const data = await resp.json();
+                if (data.active_run) {
+                    updateRegressionProgress(data.active_run);
+                } else {
+                    // Run finished — stop polling, load results
+                    clearInterval(_regressionPollTimer);
+                    _regressionPollTimer = null;
+                    document.getElementById('regressionProgress').style.display = 'none';
+                    document.getElementById('regressionRunBtn').style.display = '';
+                    document.getElementById('regressionRunBtn').disabled = false;
+                    document.getElementById('regressionCancelBtn').style.display = 'none';
+                    loadRegressionResults();
+                }
+            } catch (e) { /* ignore polling errors */ }
+        }
+
+        // ── Load historical runs into the run selector ─────────────────────────
+        async function loadRegressionRuns() {
+            const sel = document.getElementById('regressionRunSelect');
+            try {
+                const resp = await fetch('/api/regression/runs');
+                const runs = await resp.json();
+                if (!runs.length) { sel.style.display = 'none'; return; }
+                sel.style.display = '';
+                sel.innerHTML = runs.map((r, i) => {
+                    const d = new Date(r.started_at);
+                    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                               + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                               + ` — ${r.total_sites} sites, ${r.issues_found} issues`
+                               + (r.status === 'failed' ? ' (failed)' : '');
+                    return `<option value="${r.id}"${i === 0 ? ' selected' : ''}>${label}</option>`;
+                }).join('');
+            } catch (e) { /* ignore */ }
+        }
+
+        // ── Load results (latest or by run_id) ──────────────────────────────────
+        async function loadRegressionResults(runId) {
+            try {
+                // Load baselines in parallel with results so diff cells render correctly
+                await _loadBaselines();
+                const url = runId
+                    ? `/api/regression/results/${runId}`
+                    : '/api/regression/latest';
+                const resp = await fetch(url);
+                if (!resp.ok) {
+                    document.getElementById('regressionEmpty').style.display = '';
+                    document.getElementById('regressionSummary').style.display = 'none';
+                    return;
+                }
+                const data = await resp.json();
+                // /latest returns {results, started_at, ...}; /results/{id} returns an array
+                const run = Array.isArray(data) ? { results: data } : data;
+                renderRegressionResults(run);
+                loadRegressionRuns(); // refresh the run selector
+            } catch (e) {
+                document.getElementById('regressionStatus').textContent = `Error loading results: ${e.message}`;
+            }
+        }
+
+        // ── Run selector change handler ──────────────────────────────────────────
+        document.getElementById('regressionRunSelect').addEventListener('change', e => {
+            loadRegressionResults(e.target.value);
+        });
+
+        let _currentRunData = null;  // last rendered run — used to re-render after baseline changes
+
+        function renderRegressionResults(run) {
+            _currentRunData = run;
+            const results = run.results || [];
+            const tbody = document.getElementById('regressionBody');
+            const empty = document.getElementById('regressionEmpty');
+            const summary = document.getElementById('regressionSummary');
+            const info = document.getElementById('regressionRunInfo');
+            const deleteBtn = document.getElementById('regressionDeleteBtn');
+
+            _currentViewRunId = run.id || null;
+
+            if (!results.length) {
+                tbody.innerHTML = '';
+                empty.style.display = '';
+                summary.style.display = 'none';
+                deleteBtn.style.display = 'none';
+                return;
+            }
+
+            empty.style.display = 'none';
+            summary.style.display = '';
+            // Show delete button when viewing a completed run
+            deleteBtn.style.display = _currentViewRunId ? '' : 'none';
+
+            // Summary stats
+            const total = results.length;
+            const withIssues = results.filter(r => r.has_issues).length;
+            const clean = total - withIssues;
+            const loadTimes = results.filter(r => r.load_time_ms).map(r => r.load_time_ms);
+            const avgLoad = loadTimes.length
+                ? Math.round(loadTimes.reduce((a, b) => a + b, 0) / loadTimes.length)
+                : null;
+
+            document.getElementById('regStatTotal').textContent = total;
+            document.getElementById('regStatClean').textContent = clean;
+            document.getElementById('regStatIssues').textContent = withIssues;
+            document.getElementById('regStatAvgLoad').textContent = avgLoad ? `${(avgLoad / 1000).toFixed(1)}s` : '—';
+
+            // Run timestamp
+            if (run.started_at) {
+                const d = new Date(run.started_at);
+                info.textContent = `Run: ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+            }
+
+            // Render table rows with expandable detail rows
+            tbody.innerHTML = results.map((r, idx) => {
+                const jsErrors = safeJsonParse(r.js_errors, []);
+                const broken = safeJsonParse(r.broken_resources, []);
+                const hasIssue = r.has_issues;
+                const icon = hasIssue ? '⚠️' : '✅';
+                const hasHttpError = r.http_status && r.http_status >= 400;
+                const hasJsOrBroken = jsErrors.length > 0 || broken.length > 0;
+                const rowBg = hasHttpError
+                    ? 'background: var(--red-bg);'
+                    : hasJsOrBroken
+                        ? 'background: var(--yellow-bg);'
+                        : '';
+
+                // HTTP status color
+                const httpColor = !r.http_status ? 'var(--text-muted)'
+                    : r.http_status < 300 ? 'var(--green)'
+                    : r.http_status < 400 ? 'var(--yellow)'
+                    : 'var(--red)';
+
+                // Load time color
+                const lt = r.load_time_ms;
+                const loadStr = lt ? `${(lt / 1000).toFixed(1)}s` : '—';
+                const loadColor = !lt ? 'var(--text-muted)'
+                    : lt > 10000 ? 'var(--red)'
+                    : lt > 5000 ? 'var(--yellow)'
+                    : 'var(--text)';
+
+                // JS errors — count with expandable detail
+                let jsCell;
+                if (jsErrors.length) {
+                    jsCell = `<span class="reg-detail-toggle" data-target="reg-js-${idx}" style="color:var(--red); cursor:pointer; text-decoration:underline;">${jsErrors.length} error${jsErrors.length > 1 ? 's' : ''}</span>`;
+                } else {
+                    jsCell = '<span style="color:var(--text-muted);">None</span>';
+                }
+
+                // Broken resources — count with expandable detail
+                let brokenCell;
+                if (broken.length) {
+                    brokenCell = `<span class="reg-detail-toggle" data-target="reg-br-${idx}" style="color:var(--red); cursor:pointer; text-decoration:underline;">${broken.length} broken</span>`;
+                } else {
+                    brokenCell = '<span style="color:var(--text-muted);">None</span>';
+                }
+
+                // Screenshot link
+                const screenshotHtml = r.screenshot_path
+                    ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name)}" style="color:var(--accent); font-size:12px;">View</a>`
+                    : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+
+                // Visual diff cell
+                let diffCell;
+                if (r.diff_score !== null && r.diff_score !== undefined) {
+                    const score = parseFloat(r.diff_score);
+                    // Threshold: use site-level config if loaded, else fall back to 1%
+                    const siteThreshold = (_baselinesBySite[String(r.site_id)] || {})._threshold ?? 1.0;
+                    const diffColor = score === 0 ? 'var(--green)'
+                        : score < siteThreshold ? 'var(--yellow)'
+                        : 'var(--red)';
+                    const diffLabel = score === 0 ? '0% — no change'
+                        : `${score.toFixed(2)}%`;
+                    const hasCompare = r.diff_screenshot_path && r.screenshot_path;
+                    diffCell = `<div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
+                        <span class="${hasCompare ? 'diff-score-link' : ''}"
+                              style="color:${diffColor}; font-size:12px; font-weight:600; ${hasCompare ? 'cursor:pointer; text-decoration:underline;' : ''}"
+                              data-baseline="${encodeURIComponent(r.diff_screenshot_path ? ('baseline_' + r.site_id + '_' + encodeURIComponent(r.page_url || r.site_url)) : '')}"
+                              data-diff="${r.diff_screenshot_path ? encodeURIComponent(r.diff_screenshot_path) : ''}"
+                              data-current="${r.screenshot_path ? encodeURIComponent(r.screenshot_path) : ''}"
+                              data-site="${escapeHtml(r.site_name)}"
+                              data-score="${score}"
+                              data-result-id="${r.id}"
+                              data-site-id="${r.site_id}"
+                              data-page-url="${escapeHtml(r.page_url || r.site_url || '')}"
+                              >${diffLabel}</span>
+                        ${r.screenshot_path ? `<button class="set-baseline-btn" data-result-id="${r.id}" style="font-size:10px; padding:2px 6px; cursor:pointer; color:var(--text-muted); background:var(--surface-2); border:1px solid var(--border); border-radius:3px; white-space:nowrap;">Set Baseline</button>` : ''}
+                    </div>`;
+                } else if (r.screenshot_path) {
+                    // Check if a baseline has been set for this site/page (even if this result predates it)
+                    const pageKey = r.page_url || r.site_url || '';
+                    const existingBaseline = (_baselinesBySite[String(r.site_id)] || {})[pageKey];
+                    const statusLabel = existingBaseline
+                        ? '<span style="color:var(--green); font-size:11px;">Baseline set</span><br><span style="color:var(--text-muted); font-size:10px;">Run again to compare</span>'
+                        : '<span style="color:var(--text-muted); font-size:11px;">No baseline</span>';
+                    const btnLabel = existingBaseline ? 'Update Baseline' : 'Set Baseline';
+                    diffCell = `<div style="text-align:center;">
+                        ${statusLabel}<br>
+                        <button class="set-baseline-btn" data-result-id="${r.id}" style="font-size:10px; padding:2px 6px; cursor:pointer; color:var(--text-muted); background:var(--surface-2); border:1px solid var(--border); border-radius:3px; margin-top:3px; white-space:nowrap;">${btnLabel}</button>
+                    </div>`;
+                } else {
+                    diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+                }
+
+                // Build main row
+                let html = `<tr style="${rowBg}">
+                    <td style="text-align:center;">${icon}</td>
+                    <td>
+                        <div style="font-weight:500;">${escapeHtml(r.site_name || '—')}</div>
+                        <div style="font-size:11px; color:var(--text-muted);">${escapeHtml((r.page_url || r.site_url || '').replace(/^https?:\/\//, ''))}</div>
+                        ${r.error ? `<div style="font-size:11px; color:var(--red); margin-top:2px;">${escapeHtml(r.error)}</div>` : ''}
+                    </td>
+                    <td style="color:${httpColor}; font-weight:500;">${r.http_status || '—'}</td>
+                    <td style="color:${loadColor};">${loadStr}</td>
+                    <td>${jsCell}</td>
+                    <td>${brokenCell}</td>
+                    <td style="text-align:center;">${screenshotHtml}</td>
+                    <td style="text-align:center;">${diffCell}</td>
+                </tr>`;
+
+                // JS errors detail row (hidden by default)
+                if (jsErrors.length) {
+                    html += `<tr id="reg-js-${idx}" class="reg-detail-row" style="display:none;">
+                        <td></td>
+                        <td colspan="7" style="padding:8px 14px; background:var(--surface-2); border-radius:4px;">
+                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">JS Console Errors</div>
+                            ${jsErrors.map(e => `<div style="font-size:12px; color:var(--red); font-family:'SF Mono',SFMono-Regular,monospace; padding:3px 0; word-break:break-all;">${escapeHtml(e)}</div>`).join('')}
+                        </td>
+                    </tr>`;
+                }
+
+                // Broken resources detail row (hidden by default)
+                if (broken.length) {
+                    html += `<tr id="reg-br-${idx}" class="reg-detail-row" style="display:none;">
+                        <td></td>
+                        <td colspan="7" style="padding:8px 14px; background:var(--surface-2); border-radius:4px;">
+                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Broken Resources</div>
+                            ${broken.map(b => `<div style="font-size:12px; font-family:'SF Mono',SFMono-Regular,monospace; padding:3px 0; word-break:break-all;"><span style="color:var(--red); font-weight:500;">${b.status}</span> <span style="color:var(--text-muted);">${escapeHtml(b.url)}</span></div>`).join('')}
+                        </td>
+                    </tr>`;
+                }
+
+                return html;
+            }).join('');
+
+            // Wire expandable detail toggles
+            tbody.querySelectorAll('.reg-detail-toggle').forEach(toggle => {
+                toggle.addEventListener('click', () => {
+                    const target = document.getElementById(toggle.dataset.target);
+                    if (target) {
+                        const visible = target.style.display !== 'none';
+                        target.style.display = visible ? 'none' : '';
+                        toggle.style.fontWeight = visible ? 'normal' : '700';
+                    }
+                });
+            });
+
+            // Wire screenshot links
+            tbody.querySelectorAll('.screenshot-link').forEach(link => {
+                link.addEventListener('click', e => {
+                    e.preventDefault();
+                    document.getElementById('screenshotImg').src = link.dataset.src;
+                    document.getElementById('screenshotTitle').textContent = link.dataset.site;
+                    document.getElementById('screenshotOverlay').style.display = 'flex';
+                });
+            });
+
+            // Wire Set Baseline buttons
+            tbody.querySelectorAll('.set-baseline-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const resultId = btn.dataset.resultId;
+                    btn.disabled = true;
+                    btn.textContent = '…';
+                    try {
+                        const resp = await fetch(`/api/regression/baseline/${resultId}`, { method: 'POST' });
+                        const data = await resp.json();
+                        if (data.ok) {
+                            // Reload baselines then re-render the table so cells update immediately
+                            await _loadBaselines();
+                            if (_currentRunData) renderRegressionResults(_currentRunData);
+                        } else {
+                            btn.textContent = 'Failed';
+                            btn.disabled = false;
+                        }
+                    } catch {
+                        btn.textContent = 'Error';
+                        btn.disabled = false;
+                    }
+                });
+            });
+
+            // Wire diff score click → comparison viewer
+            tbody.querySelectorAll('.diff-score-link').forEach(el => {
+                el.addEventListener('click', () => {
+                    const siteId = el.dataset.siteId;
+                    const pageUrl = decodeURIComponent(el.dataset.pageUrl || '');
+                    const diffPath = decodeURIComponent(el.dataset.diff || '');
+                    const currentPath = decodeURIComponent(el.dataset.current || '');
+                    const score = el.dataset.score;
+
+                    // Look up baseline screenshot from cache
+                    const siteBaselines = _baselinesBySite[String(siteId)] || {};
+                    const baseline = siteBaselines[pageUrl];
+                    const baselinePath = baseline ? baseline.screenshot_path : null;
+
+                    document.getElementById('diffTitle').textContent =
+                        `Visual Diff — ${el.dataset.site}`;
+                    document.getElementById('diffSubtitle').textContent =
+                        `${pageUrl || ''}  •  ${parseFloat(score).toFixed(2)}% pixels changed`;
+
+                    document.getElementById('diffBaselineImg').src = baselinePath
+                        ? `/api/regression/screenshot/${encodeURIComponent(baselinePath)}`
+                        : '';
+                    document.getElementById('diffDiffImg').src = diffPath
+                        ? `/api/regression/screenshot/${diffPath}`
+                        : '';
+                    document.getElementById('diffCurrentImg').src = currentPath
+                        ? `/api/regression/screenshot/${currentPath}`
+                        : '';
+
+                    document.getElementById('diffOverlay').style.display = 'flex';
+                });
+            });
+        }
+
+        function safeJsonParse(str, fallback) {
+            if (!str) return fallback;
+            if (Array.isArray(str)) return str;
+            try { return JSON.parse(str); } catch { return fallback; }
+        }
+
+        // ── Visual diff baseline state ────────────────────────────────────────────
+        let _baselinesBySite = {};   // {site_id: {page_url: baseline_dict, _threshold: float}}
+
+        async function _loadBaselines() {
+            try {
+                const resp = await fetch('/api/regression/baselines');
+                const data = await resp.json();
+                _baselinesBySite = data || {};
+            } catch { /* non-fatal */ }
+        }
+
+        // Close diff overlay
+        document.getElementById('diffCloseBtn').addEventListener('click', () => {
+            document.getElementById('diffOverlay').style.display = 'none';
+        });
+        document.getElementById('diffOverlay').addEventListener('click', e => {
+            if (e.target === document.getElementById('diffOverlay'))
+                document.getElementById('diffOverlay').style.display = 'none';
+        });
+
+        // ── Site selector state ───────────────────────────────────────────────────
+        let _regSiteList = [];          // [{id, name, url}, ...] — all available sites
+        let _regSelectedIds = new Set(); // site IDs currently checked
+
+        function _saveSelectedSites() {
+            try {
+                // Always save as strings for consistent round-trip behaviour
+                localStorage.setItem('wsp_reg_selected', JSON.stringify([..._regSelectedIds].map(String)));
+            } catch { /* ignore */ }
+        }
+
+        function _loadSelectedSites() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('wsp_reg_selected') || '[]');
+                // Always normalise to strings to avoid int/string Set mismatch
+                if (Array.isArray(saved) && saved.length) return new Set(saved.map(String));
+            } catch { /* ignore */ }
+            return null;
+        }
+
+        async function loadRegressionSiteList() {
+            // Fetch sites from cache API (same source the server uses)
+            try {
+                const resp = await fetch('/api/mainwp/sites');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const sites = Array.isArray(data) ? data : (data.data || data.sites || []);
+                _regSiteList = sites
+                    // Normalise IDs to strings — avoids int/string mismatches in Set operations
+                    .map(s => ({ id: String(s.id), name: s.name || 'Unknown', url: s.url || '' }))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+                // Restore last selection, or default to all selected
+                const saved = _loadSelectedSites();
+                if (saved) {
+                    // Filter to only IDs that still exist in the current site list
+                    const validIds = new Set(_regSiteList.map(s => s.id));
+                    _regSelectedIds = new Set([...saved].filter(id => validIds.has(id)));
+                    // If saved selection is now empty (all sites removed?), select all
+                    if (_regSelectedIds.size === 0) _regSelectedIds = new Set(_regSiteList.map(s => s.id));
+                } else {
+                    _regSelectedIds = new Set(_regSiteList.map(s => s.id));
+                }
+                updateSiteCountBadge();
+            } catch (e) { /* ignore */ }
+        }
+
+        function updateSiteCountBadge() {
+            const total = _regSiteList.length;
+            const sel = _regSelectedIds.size;
+            const badge = document.getElementById('regressionSiteCount');
+            badge.textContent = sel === total ? `(${total})` : `(${sel}/${total})`;
+            // Also update count inside the modal
+            const modalCount = document.getElementById('siteSelectCount');
+            if (modalCount) modalCount.textContent = `${sel} of ${total} selected`;
+        }
+
+        function renderSiteSelectList() {
+            const listEl = document.getElementById('siteSelectList');
+            listEl.innerHTML = _regSiteList.map(s => {
+                const checked = _regSelectedIds.has(s.id) ? 'checked' : '';
+                return `<label style="display:flex; align-items:center; gap:10px; padding:7px 18px; cursor:pointer; font-size:13px;" class="site-select-row">
+                    <input type="checkbox" data-site-id="${s.id}" ${checked}
+                           style="accent-color:var(--accent); width:15px; height:15px; cursor:pointer; flex-shrink:0;">
+                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(s.name)}</span>
+                    <span style="font-size:11px; color:var(--text-muted); flex-shrink:0;">${escapeHtml(s.url.replace(/^https?:\/\//, ''))}</span>
+                </label>`;
+            }).join('');
+
+            // Wire individual checkboxes
+            listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    const siteId = cb.dataset.siteId; // always a string — matches _regSiteList IDs
+                    if (cb.checked) _regSelectedIds.add(siteId);
+                    else _regSelectedIds.delete(siteId);
+                    syncSelectAllCheckbox();
+                    updateSiteCountBadge();
+                    _saveSelectedSites();
+                });
+            });
+
+            syncSelectAllCheckbox();
+            updateSiteCountBadge();
+        }
+
+        function syncSelectAllCheckbox() {
+            const allCb = document.getElementById('siteSelectAll');
+            allCb.checked = _regSelectedIds.size === _regSiteList.length;
+            allCb.indeterminate = _regSelectedIds.size > 0 && _regSelectedIds.size < _regSiteList.length;
+        }
+
+        // Select All toggle
+        document.getElementById('siteSelectAll').addEventListener('change', e => {
+            const check = e.target.checked;
+            _regSelectedIds = check ? new Set(_regSiteList.map(s => s.id)) : new Set();
+            document.querySelectorAll('#siteSelectList input[type="checkbox"]').forEach(cb => {
+                cb.checked = check;
+            });
+            updateSiteCountBadge();
+            _saveSelectedSites();
+        });
+
+        // Open modal
+        document.getElementById('regressionSiteSelectBtn').addEventListener('click', () => {
+            renderSiteSelectList();
+            document.getElementById('siteSelectOverlay').style.display = 'flex';
+        });
+
+        // Close modal
+        function closeSiteSelectModal() {
+            document.getElementById('siteSelectOverlay').style.display = 'none';
+        }
+        document.getElementById('siteSelectCloseBtn').addEventListener('click', closeSiteSelectModal);
+        document.getElementById('siteSelectDoneBtn').addEventListener('click', closeSiteSelectModal);
+        document.getElementById('siteSelectOverlay').addEventListener('click', e => {
+            if (e.target === e.currentTarget) closeSiteSelectModal();
+        });
+
+        // Wire the Run, Cancel, and Delete buttons
+        document.getElementById('regressionRunBtn').addEventListener('click', startRegressionRun);
+        document.getElementById('regressionCancelBtn').addEventListener('click', cancelRegressionRun);
+        document.getElementById('regressionDeleteBtn').addEventListener('click', () => {
+            deleteRegressionRun(_currentViewRunId);
+        });
+
+        // Wire screenshot close
+        document.getElementById('screenshotCloseBtn').addEventListener('click', () => {
+            document.getElementById('screenshotOverlay').style.display = 'none';
+            document.getElementById('screenshotImg').src = '';
+        });
+        document.getElementById('screenshotOverlay').addEventListener('click', e => {
+            if (e.target === e.currentTarget) {
+                document.getElementById('screenshotOverlay').style.display = 'none';
+                document.getElementById('screenshotImg').src = '';
+            }
+        });
 
         // ============================================================================
         // Startup
@@ -2117,13 +3160,223 @@
 
             setInterval(() => { if (!_logPaused) fetchLogs(); }, 2000);
 
+            // ── Log panel drag-to-resize ──────────────────────────────────────────
+            const _logPanel  = document.getElementById('logPanel');
+            const _logHandle = document.getElementById('logResizeHandle');
+            const _container = document.querySelector('.container');
+            const LOG_MIN_H  = 60;
+            const LOG_MAX_H  = () => Math.floor(window.innerHeight * 0.85);
+
+            let _dragStartY = null;
+            let _dragStartH = null;
+
+            _logHandle.addEventListener('mousedown', e => {
+                if (!logPanelExpanded) return; // can't resize while collapsed
+                e.preventDefault();
+                _dragStartY = e.clientY;
+                _dragStartH = _logPanel.offsetHeight;
+                _logPanel.classList.add('resizing');
+                document.body.style.userSelect = 'none';
+            });
+
+            document.addEventListener('mousemove', e => {
+                if (_dragStartY === null) return;
+                const delta = _dragStartY - e.clientY; // drag up → positive → taller
+                const newH = Math.min(Math.max(_dragStartH + delta, LOG_MIN_H), LOG_MAX_H());
+                _logPanel.style.height = newH + 'px';
+                _logCustomHeight = newH;
+                // Keep main content from hiding behind the panel
+                if (_container) _container.style.paddingBottom = (newH + 20) + 'px';
+            });
+
+            document.addEventListener('mouseup', e => {
+                if (_dragStartY === null) return;
+                _dragStartY = null;
+                _dragStartH = null;
+                _logPanel.classList.remove('resizing');
+                document.body.style.userSelect = '';
+                _saveLogPanelState();
+            });
+
+            // Restore log panel state from localStorage
+            if (!logPanelExpanded) {
+                _logPanel.style.height = '';
+                _logPanel.className = 'log-panel collapsed';
+                document.getElementById('logToggle').textContent = 'Expand';
+            } else if (_logCustomHeight !== null) {
+                _logPanel.style.height = _logCustomHeight + 'px';
+                if (_container) _container.style.paddingBottom = (_logCustomHeight + 20) + 'px';
+            }
+
             initApp();
             fetchLogs();
         });
+
+        // ============================================================================
+        // Sites Tab
+        // ============================================================================
+        let _sitesList = [];        // full list from /api/sites
+        let _sitePanelId = null;    // site_id currently open in the panel
+
+        async function loadSitesTab() {
+            const status = document.getElementById('sitesStatus');
+            const empty  = document.getElementById('sitesEmpty');
+            const table  = document.getElementById('sitesTable');
+            status.textContent = 'Loading…';
+            try {
+                const resp = await fetch('/api/sites');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                _sitesList = await resp.json();
+                status.textContent = '';
+                if (!_sitesList.length) {
+                    empty.style.display = '';
+                    table.style.display = 'none';
+                } else {
+                    empty.style.display = 'none';
+                    table.style.display = '';
+                    renderSitesTable();
+                }
+            } catch (e) {
+                status.textContent = `Error loading sites: ${e.message}`;
+            }
+        }
+
+        function renderSitesTable() {
+            const tbody = document.getElementById('sitesBody');
+            tbody.innerHTML = _sitesList.map(s => {
+                let pages = [];
+                try { pages = JSON.parse(s.test_pages || '[]'); } catch {}
+                const pageCount = pages.length || 1; // always at least homepage
+                const clientHtml = s.client_name
+                    ? `<span style="color:var(--text);">${escapeHtml(s.client_name)}</span>`
+                    : `<span style="color:var(--text-muted);">—</span>`;
+                const notesHtml = s.notes
+                    ? `<span style="color:var(--text-muted); font-size:12px;" title="${escapeHtml(s.notes)}">${escapeHtml(s.notes.slice(0, 40))}${s.notes.length > 40 ? '…' : ''}</span>`
+                    : `<span style="color:var(--text-muted);">—</span>`;
+                return `<tr>
+                    <td>
+                        <div style="font-weight:500;">${escapeHtml(s.name)}</div>
+                        <div style="font-size:11px; color:var(--text-muted);">${escapeHtml((s.url || '').replace(/^https?:\/\//, ''))}</div>
+                    </td>
+                    <td>${clientHtml}</td>
+                    <td style="text-align:center;">
+                        <span style="color:${pageCount > 1 ? 'var(--accent)' : 'var(--text-muted)'}; font-weight:${pageCount > 1 ? '600' : '400'};">${pageCount}</span>
+                    </td>
+                    <td>${notesHtml}</td>
+                    <td style="text-align:right;">
+                        <button class="btn site-edit-btn" data-site-id="${s.id}" style="font-size:12px; padding:5px 10px;">Edit</button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            tbody.querySelectorAll('.site-edit-btn').forEach(btn => {
+                btn.addEventListener('click', () => openSitePanel(btn.dataset.siteId));
+            });
+        }
+
+        // ── Slide-out panel ──────────────────────────────────────────────────────────
+        function openSitePanel(siteId) {
+            const site = _sitesList.find(s => String(s.id) === String(siteId));
+            if (!site) return;
+            _sitePanelId = siteId;
+
+            document.getElementById('sitePanelName').textContent = site.name;
+            document.getElementById('sitePanelUrl').textContent = site.url || '';
+            document.getElementById('siteConfigClient').value = site.client_name || '';
+            document.getElementById('siteConfigNotes').value = site.notes || '';
+            document.getElementById('siteConfigDiffThreshold').value =
+                site.diff_threshold != null ? site.diff_threshold : 1.0;
+
+            // Populate pages list
+            let pages = [];
+            try { pages = JSON.parse(site.test_pages || '[]'); } catch {}
+            if (!pages.length) pages = [site.url || ''];
+            renderPagesList(pages);
+
+            document.getElementById('sitePanelBackdrop').classList.add('open');
+            document.getElementById('sitePanel').classList.add('open');
+            document.getElementById('siteConfigClient').focus();
+        }
+
+        function closeSitePanel() {
+            document.getElementById('sitePanelBackdrop').classList.remove('open');
+            document.getElementById('sitePanel').classList.remove('open');
+            _sitePanelId = null;
+        }
+
+        function renderPagesList(pages) {
+            const list = document.getElementById('sitePagesList');
+            list.innerHTML = pages.map((url, i) =>
+                `<div class="page-row" data-idx="${i}">
+                    <input type="url" class="field-input page-url-input"
+                           value="${escapeHtml(url)}" placeholder="https://…">
+                    <button class="page-remove-btn" data-idx="${i}" title="Remove">✕</button>
+                </div>`
+            ).join('');
+            list.querySelectorAll('.page-remove-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    btn.closest('.page-row').remove();
+                });
+            });
+        }
+
+        function getPagesFromPanel() {
+            return [...document.querySelectorAll('.page-url-input')]
+                .map(i => i.value.trim())
+                .filter(Boolean);
+        }
+
+        document.getElementById('siteAddPageBtn').addEventListener('click', () => {
+            const list = document.getElementById('sitePagesList');
+            const idx = list.querySelectorAll('.page-row').length;
+            const row = document.createElement('div');
+            row.className = 'page-row';
+            row.dataset.idx = idx;
+            row.innerHTML = `<input type="url" class="field-input page-url-input" placeholder="https://…">
+                <button class="page-remove-btn" title="Remove">✕</button>`;
+            row.querySelector('.page-remove-btn').addEventListener('click', () => row.remove());
+            list.appendChild(row);
+            row.querySelector('input').focus();
+        });
+
+        document.getElementById('sitePanelCloseBtn').addEventListener('click', closeSitePanel);
+        document.getElementById('sitePanelCancelBtn').addEventListener('click', closeSitePanel);
+        document.getElementById('sitePanelBackdrop').addEventListener('click', closeSitePanel);
+
+        document.getElementById('sitePanelSaveBtn').addEventListener('click', async () => {
+            if (!_sitePanelId) return;
+            const saveBtn = document.getElementById('sitePanelSaveBtn');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving…';
+            const payload = {
+                client_name: document.getElementById('siteConfigClient').value.trim(),
+                notes: document.getElementById('siteConfigNotes').value.trim(),
+                test_pages: getPagesFromPanel(),
+                diff_threshold: parseFloat(document.getElementById('siteConfigDiffThreshold').value) || 1.0,
+            };
+            try {
+                const resp = await fetch(`/api/sites/config/${_sitePanelId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await resp.json();
+                if (data.error) throw new Error(data.error);
+                closeSitePanel();
+                await loadSitesTab(); // refresh table
+            } catch (e) {
+                document.getElementById('sitesStatus').textContent = `Save failed: ${e.message}`;
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+            }
+        });
+
     </script>
 
     <!-- Log Panel -->
     <div id="logPanel" class="log-panel expanded">
+        <div id="logResizeHandle" class="log-resize-handle"></div>
         <div class="log-header" onclick="toggleLogPanel()">
             <div class="log-header-left">
                 <h3>Server Log</h3>

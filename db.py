@@ -82,8 +82,71 @@ def init_db():
             ON update_history(updated_utime);
         CREATE INDEX IF NOT EXISTS idx_history_name
             ON update_history(name);
+
+        -- Regression testing tables
+        CREATE TABLE IF NOT EXISTS regression_runs (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at      TEXT NOT NULL,
+            finished_at     TEXT,
+            status          TEXT DEFAULT 'running',  -- running, completed, failed
+            total_sites     INTEGER DEFAULT 0,
+            checked         INTEGER DEFAULT 0,
+            issues_found    INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS regression_results (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id          INTEGER NOT NULL,
+            site_id         INTEGER,
+            site_name       TEXT,
+            site_url        TEXT,
+            http_status     INTEGER,
+            load_time_ms    INTEGER,
+            js_errors       TEXT,       -- JSON array
+            broken_resources TEXT,      -- JSON array of {url, status}
+            screenshot_path TEXT,
+            has_issues      INTEGER DEFAULT 0,
+            error           TEXT,
+            checked_at      TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (run_id) REFERENCES regression_runs(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_regression_run
+            ON regression_results(run_id);
+
+        -- Per-site configuration
+        CREATE TABLE IF NOT EXISTS site_config (
+            site_id     TEXT PRIMARY KEY,
+            client_name TEXT,
+            notes       TEXT,
+            test_pages  TEXT DEFAULT '[]',  -- JSON array of full URLs to test
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        -- Visual regression baselines: one screenshot per (site_id, page_url)
+        CREATE TABLE IF NOT EXISTS baseline_screenshots (
+            site_id         TEXT NOT NULL,
+            page_url        TEXT NOT NULL,
+            screenshot_path TEXT NOT NULL,
+            run_id          INTEGER NOT NULL,
+            set_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (site_id, page_url)
+        );
     """)
     conn.commit()
+
+    # Migrations: add columns that may not exist in older DBs
+    for migration in [
+        "ALTER TABLE regression_results ADD COLUMN page_url TEXT",
+        "ALTER TABLE regression_results ADD COLUMN diff_score REAL",
+        "ALTER TABLE regression_results ADD COLUMN diff_screenshot_path TEXT",
+        "ALTER TABLE site_config ADD COLUMN diff_threshold REAL DEFAULT 1.0",
+    ]:
+        try:
+            conn.execute(migration)
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 # ─── Update History ────────────────────────────────────────────
@@ -272,3 +335,203 @@ def get_cache_age() -> str | None:
         "SELECT MIN(updated_at) FROM sites_cache"
     ).fetchone()
     return row[0] if row else None
+
+
+# ─── Regression Testing ──────────────────────────────────────
+
+
+def create_regression_run() -> int:
+    """Create a new regression run record. Returns the run_id."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO regression_runs (started_at) VALUES (?)",
+        (datetime.now().isoformat(),)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def save_regression_result(run_id: int, result: dict):
+    """Save a single site's regression check result."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO regression_results "
+        "(run_id, site_id, site_name, site_url, page_url, http_status, load_time_ms, "
+        " js_errors, broken_resources, screenshot_path, has_issues, error, "
+        " diff_score, diff_screenshot_path) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, result["site_id"], result["site_name"], result["site_url"],
+         result.get("page_url"),
+         result["http_status"], result["load_time_ms"],
+         result["js_errors"], result["broken_resources"],
+         result["screenshot_path"], result["has_issues"],
+         result.get("error"),
+         result.get("diff_score"), result.get("diff_screenshot_path"))
+    )
+    # Update the run's checked count
+    conn.execute(
+        "UPDATE regression_runs SET checked = checked + 1 WHERE id = ?",
+        (run_id,)
+    )
+    conn.commit()
+
+
+def finish_regression_run(run_id: int, total: int, issues: int,
+                          status: str = "completed"):
+    """Mark a regression run as finished."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE regression_runs "
+        "SET finished_at = ?, status = ?, total_sites = ?, issues_found = ? "
+        "WHERE id = ?",
+        (datetime.now().isoformat(), status, total, issues, run_id)
+    )
+    conn.commit()
+
+
+def get_regression_runs(limit: int = 20) -> list:
+    """Get recent regression runs, newest first."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM regression_runs ORDER BY id DESC LIMIT ?",
+        (limit,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_regression_results(run_id: int) -> list:
+    """Get all results for a specific run."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM regression_results WHERE run_id = ? ORDER BY site_name",
+        (run_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_regression_run(run_id: int) -> list:
+    """Delete a regression run and its results. Returns all image paths for cleanup."""
+    conn = _get_conn()
+    # Collect screenshot and diff image filenames before deleting
+    rows = conn.execute(
+        "SELECT screenshot_path, diff_screenshot_path FROM regression_results "
+        "WHERE run_id = ?",
+        (run_id,)
+    ).fetchall()
+    image_paths = []
+    for r in rows:
+        if r[0]:
+            image_paths.append(r[0])
+        if r[1]:
+            image_paths.append(r[1])
+    # Delete results then the run
+    conn.execute("DELETE FROM regression_results WHERE run_id = ?", (run_id,))
+    conn.execute("DELETE FROM regression_runs WHERE id = ?", (run_id,))
+    conn.commit()
+    return image_paths
+
+
+def get_latest_regression_run() -> dict | None:
+    """Get the most recent completed regression run with its results."""
+    conn = _get_conn()
+    run = conn.execute(
+        "SELECT * FROM regression_runs "
+        "WHERE status IN ('completed', 'failed') "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not run:
+        return None
+    run_dict = dict(run)
+    run_dict["results"] = get_regression_results(run_dict["id"])
+    return run_dict
+
+
+# ─── Site Configuration ────────────────────────────────────────
+
+
+def get_site_config(site_id) -> dict:
+    """Get config for a single site. Returns empty dict with defaults if not set."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM site_config WHERE site_id = ?", (str(site_id),)
+    ).fetchone()
+    if row:
+        return dict(row)
+    return {"site_id": str(site_id), "client_name": None, "notes": None,
+            "test_pages": "[]", "diff_threshold": 1.0, "updated_at": None}
+
+
+def save_site_config(site_id, client_name: str = None, notes: str = None,
+                     test_pages: str = "[]", diff_threshold: float = None) -> None:
+    """Insert or replace config for a site."""
+    conn = _get_conn()
+    threshold = diff_threshold if diff_threshold is not None else 1.0
+    conn.execute(
+        "INSERT INTO site_config (site_id, client_name, notes, test_pages, diff_threshold, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, datetime('now')) "
+        "ON CONFLICT(site_id) DO UPDATE SET "
+        "  client_name = excluded.client_name, "
+        "  notes = excluded.notes, "
+        "  test_pages = excluded.test_pages, "
+        "  diff_threshold = excluded.diff_threshold, "
+        "  updated_at = excluded.updated_at",
+        (str(site_id), client_name or None, notes or None, test_pages or "[]", threshold)
+    )
+    conn.commit()
+
+
+def get_all_site_configs() -> dict:
+    """Return all site configs as a dict keyed by site_id string."""
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM site_config").fetchall()
+    return {str(r["site_id"]): dict(r) for r in rows}
+
+
+# ─── Visual Regression Baselines ───────────────────────────────
+
+
+def get_baseline(site_id, page_url: str) -> dict | None:
+    """Get the current baseline for a (site_id, page_url) pair, or None."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM baseline_screenshots WHERE site_id = ? AND page_url = ?",
+        (str(site_id), page_url)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def set_baseline(site_id, page_url: str, screenshot_path: str, run_id: int) -> None:
+    """Promote a screenshot to baseline for a (site_id, page_url) pair."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO baseline_screenshots (site_id, page_url, screenshot_path, run_id, set_at) "
+        "VALUES (?, ?, ?, ?, datetime('now')) "
+        "ON CONFLICT(site_id, page_url) DO UPDATE SET "
+        "  screenshot_path = excluded.screenshot_path, "
+        "  run_id = excluded.run_id, "
+        "  set_at = excluded.set_at",
+        (str(site_id), page_url, screenshot_path, run_id)
+    )
+    conn.commit()
+
+
+def get_all_baselines() -> dict:
+    """Return all baselines as a nested dict: {site_id: {page_url: baseline_dict}}."""
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM baseline_screenshots").fetchall()
+    result: dict = {}
+    for r in rows:
+        sid = str(r["site_id"])
+        if sid not in result:
+            result[sid] = {}
+        result[sid][r["page_url"]] = dict(r)
+    return result
+
+
+def get_regression_result_by_id(result_id: int) -> dict | None:
+    """Get a single regression result row by its primary key."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM regression_results WHERE id = ?", (result_id,)
+    ).fetchone()
+    return dict(row) if row else None
