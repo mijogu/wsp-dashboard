@@ -446,6 +446,24 @@ def get_latest_regression_run() -> dict | None:
     return run_dict
 
 
+def get_latest_result_per_site() -> list:
+    """Return the most recent regression result for each (site_id, page_url) pair."""
+    conn = _get_conn()
+    rows = conn.execute("""
+        SELECT rr.*, runs.started_at AS run_started_at, runs.status AS run_status
+        FROM regression_results rr
+        INNER JOIN (
+            SELECT site_id, COALESCE(page_url, '') AS norm_page,
+                   MAX(id) AS max_id
+            FROM regression_results
+            GROUP BY site_id, norm_page
+        ) latest ON rr.id = latest.max_id
+        LEFT JOIN regression_runs runs ON rr.run_id = runs.id
+        ORDER BY rr.site_name, rr.page_url
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ─── Site Configuration ────────────────────────────────────────
 
 

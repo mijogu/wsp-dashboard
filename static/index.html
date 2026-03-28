@@ -275,6 +275,61 @@
         .modal-buttons { display: flex; gap: 8px; }
         .modal-buttons .btn { flex: 1; }
 
+        /* ── Header Nav Buttons ─────────────────────────────────── */
+        .header-nav-btn.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        /* ── Settings Page ──────────────────────────────────────── */
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 900px;
+        }
+        @media (max-width: 700px) {
+            .settings-grid { grid-template-columns: 1fr; }
+        }
+        .settings-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .settings-section h3 {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .settings-section.disabled { opacity: 0.55; pointer-events: none; }
+        .settings-badge {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: var(--surface-2);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 2px 8px;
+        }
+        .settings-section .form-group { margin-bottom: 14px; }
+        .settings-section .form-group:last-child { margin-bottom: 0; }
+        .settings-footer {
+            max-width: 900px;
+            margin-top: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
         .status-text { font-size: 13px; margin-bottom: 16px; }
         .status-text.loading { color: var(--text-muted); }
         .status-text.error { color: var(--red); }
@@ -394,65 +449,7 @@
             .stats-row { grid-template-columns: repeat(2, 1fr); }
         }
 
-        /* ── Site Config Slide-out Panel ──────────────────────────── */
-        .site-panel-backdrop {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.45);
-            z-index: 300;
-        }
-        .site-panel-backdrop.open { display: block; }
-
-        .site-panel {
-            position: fixed;
-            top: 0; right: 0;
-            width: 400px;
-            max-width: 100vw;
-            height: 100vh;
-            background: var(--surface);
-            border-left: 1px solid var(--border);
-            z-index: 301;
-            display: flex;
-            flex-direction: column;
-            transform: translateX(100%);
-            transition: transform 0.22s cubic-bezier(.4,0,.2,1);
-            overflow: hidden;
-        }
-        .site-panel.open { transform: translateX(0); }
-
-        .site-panel-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 18px 20px 14px;
-            border-bottom: 1px solid var(--border);
-            flex-shrink: 0;
-        }
-        .site-panel-header button {
-            background: none; border: none; color: var(--text-muted);
-            font-size: 20px; cursor: pointer; padding: 0; line-height: 1;
-        }
-        .site-panel-header button:hover { color: var(--text); }
-        .site-panel-title { font-size: 14px; font-weight: 600; }
-        .site-panel-url { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
-
-        .site-panel-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        .site-panel-footer {
-            padding: 14px 20px;
-            border-top: 1px solid var(--border);
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            flex-shrink: 0;
-        }
+        /* (slide-out panel removed — site config is now a full page) */
 
         .field-label {
             font-size: 11px;
@@ -533,14 +530,8 @@
             <h1>WP Maintenance Dashboard</h1>
         </div>
         <div class="header-right">
-            <select id="refreshInterval" class="btn">
-                <option value="300000">5 min</option>
-                <option value="600000">10 min</option>
-                <option value="900000">15 min</option>
-                <option value="1800000">30 min</option>
-            </select>
-            <button class="btn" id="refreshBtn" title="Refresh now">Refresh</button>
-            <button class="btn" id="settingsBtn" title="Settings & API Keys">Settings</button>
+            <button class="btn header-nav-btn" id="sitesBtn">Sites</button>
+            <button class="btn header-nav-btn" id="settingsBtn">Settings</button>
             <div class="last-updated">
                 Last updated: <span id="lastUpdated">never</span>
             </div>
@@ -558,7 +549,6 @@
             <button class="tab" data-tab="history">Update History</button>
             <button class="tab" data-tab="downtime">Downtime Log</button>
             <button class="tab" data-tab="regression">Regression</button>
-            <button class="tab" data-tab="sites">Sites</button>
         </div>
 
         <!-- Overview Tab -->
@@ -752,6 +742,10 @@
                 <button class="btn btn-primary" id="regressionRunBtn">▶ Run Site Check</button>
                 <button class="btn" id="regressionCancelBtn" style="display:none; background:var(--red-bg); border-color:var(--red); color:var(--red);">✕ Cancel</button>
                 <button class="btn" id="regressionSiteSelectBtn" style="font-size:12px; padding:5px 12px;">☰ Sites <span id="regressionSiteCount" style="opacity:0.6;"></span></button>
+                <div id="regViewToggle" style="display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; font-size:12px; margin-left:4px;">
+                    <button id="regViewSites" class="btn btn-primary" style="border:0; border-radius:0; padding:5px 14px; font-size:12px;">Sites</button>
+                    <button id="regViewRuns" class="btn" style="border:0; border-radius:0; padding:5px 14px; font-size:12px;">Runs</button>
+                </div>
                 <span id="regressionStatus" style="font-size:12px; color:var(--text-muted);"></span>
                 <div style="flex:1;"></div>
                 <button class="btn" id="regressionDeleteBtn" style="display:none; font-size:12px; padding:5px 10px; color:var(--red); border-color:var(--red); background:transparent;" title="Delete this run">🗑 Delete Run</button>
@@ -886,69 +880,194 @@
         </div>
         <!-- Sites Tab -->
         <div id="sites" class="tab-content">
-            <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
-                <span id="sitesStatus" style="font-size:12px; color:var(--text-muted);"></span>
+            <!-- List mode -->
+            <div id="sitesListView">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                    <span id="sitesStatus" style="font-size:12px; color:var(--text-muted);"></span>
+                </div>
+                <div id="sitesEmpty" class="empty-state" style="display:none;">
+                    <p>No sites in cache yet — refresh MainWP data to populate the site list.</p>
+                </div>
+                <table class="sites-config-table" id="sitesTable" style="display:none;">
+                    <thead>
+                        <tr>
+                            <th>Site</th>
+                            <th>Client</th>
+                            <th style="text-align:center;">Pages</th>
+                            <th>Notes</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="sitesBody"></tbody>
+                </table>
             </div>
-            <div id="sitesEmpty" class="empty-state" style="display:none;">
-                <p>No sites in cache yet — refresh MainWP data to populate the site list.</p>
+            <!-- Detail mode -->
+            <div id="siteDetail" style="display:none;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
+                    <button class="btn" id="siteDetailBackBtn">&larr; All Sites</button>
+                    <div>
+                        <div style="font-weight:600; font-size:16px;" id="siteDetailName"></div>
+                        <div style="font-size:12px; color:var(--text-muted);" id="siteDetailUrl"></div>
+                    </div>
+                </div>
+                <div class="settings-grid">
+                    <!-- General -->
+                    <div class="settings-section">
+                        <h3>General</h3>
+                        <div class="form-group">
+                            <label>Client Name</label>
+                            <input type="text" class="field-input" id="siteConfigClient" placeholder="e.g. Acme Corp">
+                        </div>
+                        <div class="form-group">
+                            <label>Notes</label>
+                            <textarea class="field-input" id="siteConfigNotes" rows="3"
+                                      placeholder="e.g. SiteGround hosted — bot detection active on login page"></textarea>
+                        </div>
+                    </div>
+                    <!-- Regression -->
+                    <div class="settings-section">
+                        <h3>Regression Testing</h3>
+                        <div class="form-group">
+                            <label>Visual Diff Threshold (%)</label>
+                            <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+                                Flag when pixel diff exceeds this %. Default 1%. Raise for sites with animations.
+                            </div>
+                            <input type="number" class="field-input" id="siteConfigDiffThreshold"
+                                   min="0" max="100" step="0.1" placeholder="1.0" style="width:100px;">
+                        </div>
+                        <div class="form-group">
+                            <label>Test Pages</label>
+                            <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+                                The homepage is always tested. Add paths like <code style="background:var(--surface-2); padding:1px 5px; border-radius:3px;">/about</code> for additional pages.
+                            </div>
+                            <div id="sitePagesList"></div>
+                            <button class="btn" id="siteAddPageBtn" style="font-size:12px; margin-top:8px;">+ Add Page</button>
+                        </div>
+                    </div>
+                    <!-- Alerts (placeholder) -->
+                    <div class="settings-section disabled">
+                        <h3>Alerts <span class="settings-badge">Coming Soon</span></h3>
+                        <div class="form-group">
+                            <label>Staleness Threshold (hours)</label>
+                            <input type="number" class="field-input" disabled placeholder="24" style="width:100px;">
+                        </div>
+                    </div>
+                    <!-- Form Testing (placeholder) -->
+                    <div class="settings-section disabled">
+                        <h3>Form Testing <span class="settings-badge">Coming Soon</span></h3>
+                        <div class="form-group">
+                            <label>Form URL</label>
+                            <input type="text" class="field-input" disabled placeholder="/contact">
+                        </div>
+                        <div class="form-group">
+                            <label>Submit Selector</label>
+                            <input type="text" class="field-input" disabled placeholder="button[type=submit]">
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-footer">
+                    <button class="btn btn-primary" id="siteDetailSaveBtn">Save Changes</button>
+                    <span id="siteDetailStatus" class="status-text" style="display: none;"></span>
+                </div>
             </div>
-            <table class="sites-config-table" id="sitesTable" style="display:none;">
-                <thead>
-                    <tr>
-                        <th>Site</th>
-                        <th>Client</th>
-                        <th style="text-align:center;">Pages</th>
-                        <th>Notes</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody id="sitesBody"></tbody>
-            </table>
         </div>
-    </div>
+        <!-- Settings Tab -->
+        <div id="settings" class="tab-content">
+            <div class="settings-grid">
+                <!-- Dashboard -->
+                <div class="settings-section">
+                    <h3>Dashboard</h3>
+                    <div class="form-group">
+                        <label>Auto-Refresh Interval</label>
+                        <select id="refreshInterval" class="field-input" style="width:auto;">
+                            <option value="300000">5 min</option>
+                            <option value="600000">10 min</option>
+                            <option value="900000">15 min</option>
+                            <option value="1800000">30 min</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Manual Refresh</label>
+                        <button class="btn" id="refreshBtn" title="Refresh all data now">Refresh Now</button>
+                    </div>
+                </div>
 
-    <!-- Site Config Slide-out Panel -->
-    <div id="sitePanelBackdrop" class="site-panel-backdrop"></div>
-    <div id="sitePanel" class="site-panel" role="dialog" aria-modal="true">
-        <div class="site-panel-header">
-            <button id="sitePanelCloseBtn" aria-label="Close">&#x2190;</button>
-            <div>
-                <div class="site-panel-title" id="sitePanelName">Site Configuration</div>
-                <div class="site-panel-url" id="sitePanelUrl"></div>
-            </div>
-        </div>
-        <div class="site-panel-body">
-            <div>
-                <div class="field-label">Client Name</div>
-                <input type="text" class="field-input" id="siteConfigClient"
-                       placeholder="e.g. Acme Corp">
-            </div>
-            <div>
-                <div class="field-label">Notes</div>
-                <textarea class="field-input" id="siteConfigNotes"
-                          placeholder="e.g. SiteGround hosted — bot detection active on login page"></textarea>
-            </div>
-            <div>
-                <div class="field-label">Visual Diff Threshold (%)</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
-                    Flag a run as changed when pixel diff exceeds this percentage. Default is 1%. Raise for sites with animations or rotating content.
+                <!-- Uptime Robot -->
+                <div class="settings-section">
+                    <h3>Uptime Robot</h3>
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" class="field-input" id="urApiKey" placeholder="Your Uptime Robot API key">
+                    </div>
                 </div>
-                <input type="number" class="field-input" id="siteConfigDiffThreshold"
-                       min="0" max="100" step="0.1" placeholder="1.0"
-                       style="width:100px;">
-            </div>
-            <div>
-                <div class="field-label">Test Pages</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">
-                    URLs checked during regression runs. The homepage is always the default — add paths like <code style="background:var(--surface-2); padding:1px 5px; border-radius:3px;">/about</code> or full URLs for additional pages.
+
+                <!-- Cloudflare -->
+                <div class="settings-section">
+                    <h3>Cloudflare</h3>
+                    <div class="form-group">
+                        <label>API Token</label>
+                        <input type="password" class="field-input" id="cfApiToken" placeholder="Your Cloudflare API token">
+                    </div>
+                    <div class="form-group">
+                        <label>Account ID</label>
+                        <input type="text" class="field-input" id="cfAccountId" placeholder="Your Cloudflare Account ID">
+                    </div>
                 </div>
-                <div id="sitePagesList"></div>
-                <button class="add-page-btn" id="siteAddPageBtn">+ Add Page</button>
+
+                <!-- MainWP -->
+                <div class="settings-section">
+                    <h3>MainWP</h3>
+                    <div class="form-group">
+                        <label>Dashboard URL</label>
+                        <input type="text" class="field-input" id="mwpUrl" placeholder="https://your-mainwp-dashboard.com">
+                    </div>
+                    <div class="form-group">
+                        <label>API Key (Bearer Token)</label>
+                        <input type="password" class="field-input" id="mwpApiKey" placeholder="Your MainWP API key">
+                    </div>
+                </div>
+
+                <!-- Alerts & Webhooks (placeholder) -->
+                <div class="settings-section disabled">
+                    <h3>Alerts & Webhooks <span class="settings-badge">Coming Soon</span></h3>
+                    <div class="form-group">
+                        <label>Webhook URL</label>
+                        <input type="text" class="field-input" disabled placeholder="https://hooks.slack.com/…">
+                    </div>
+                    <div class="form-group">
+                        <label>Staleness Threshold (hours)</label>
+                        <input type="number" class="field-input" disabled placeholder="24" style="width:100px;">
+                    </div>
+                </div>
+
+                <!-- Scheduling (placeholder) -->
+                <div class="settings-section disabled">
+                    <h3>Scheduling <span class="settings-badge">Coming Soon</span></h3>
+                    <div class="form-group">
+                        <label>Regression Run Cadence</label>
+                        <select class="field-input" disabled style="width:auto;">
+                            <option>Daily</option>
+                            <option>Weekly</option>
+                            <option>Manual only</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Backup & Restore -->
+                <div class="settings-section">
+                    <h3>Backup & Restore</h3>
+                    <div class="modal-buttons">
+                        <button class="btn" id="exportBtn">Export Settings</button>
+                        <button class="btn" id="importBtn">Import Settings</button>
+                    </div>
+                    <input type="file" id="importFile" style="display: none;" accept=".json">
+                </div>
             </div>
-        </div>
-        <div class="site-panel-footer">
-            <button class="btn" id="sitePanelCancelBtn">Cancel</button>
-            <button class="btn btn-primary" id="sitePanelSaveBtn">Save Changes</button>
+
+            <div class="settings-footer">
+                <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
+                <span id="settingsStatus" class="status-text" style="display: none;"></span>
+            </div>
         </div>
     </div>
 
@@ -967,62 +1086,6 @@
             <div id="passphraseError" class="status-text error" style="display: none;"></div>
             <div class="modal-actions">
                 <button class="btn btn-primary" id="unlockBtn">Unlock</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Settings Modal -->
-    <div id="settingsOverlay" class="modal-overlay">
-        <div class="modal">
-            <h2>Settings & Configuration</h2>
-            <p>Manage your API keys and configuration.</p>
-
-            <div class="modal-section">
-                <h3>Uptime Robot</h3>
-                <div class="form-group">
-                    <label>API Key</label>
-                    <input type="password" id="urApiKey" placeholder="Your Uptime Robot API key">
-                </div>
-            </div>
-
-            <div class="modal-section">
-                <h3>Cloudflare</h3>
-                <div class="form-group">
-                    <label>API Token</label>
-                    <input type="password" id="cfApiToken" placeholder="Your Cloudflare API token">
-                </div>
-                <div class="form-group">
-                    <label>Account ID</label>
-                    <input type="text" id="cfAccountId" placeholder="Your Cloudflare Account ID">
-                </div>
-            </div>
-
-            <div class="modal-section">
-                <h3>MainWP</h3>
-                <div class="form-group">
-                    <label>Dashboard URL</label>
-                    <input type="text" id="mwpUrl" placeholder="https://your-mainwp-dashboard.com">
-                </div>
-                <div class="form-group">
-                    <label>API Key (Bearer Token)</label>
-                    <input type="password" id="mwpApiKey" placeholder="Your MainWP API key">
-                </div>
-            </div>
-
-            <div class="modal-section">
-                <h3>Backup & Restore</h3>
-                <div class="modal-buttons">
-                    <button class="btn" id="exportBtn">Export Settings</button>
-                    <button class="btn" id="importBtn">Import Settings</button>
-                </div>
-                <input type="file" id="importFile" style="display: none;" accept=".json">
-            </div>
-
-            <div id="settingsStatus" class="status-text" style="display: none;"></div>
-
-            <div class="modal-actions">
-                <button class="btn" id="settingsCloseBtn">Close</button>
-                <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
             </div>
         </div>
     </div>
@@ -1140,7 +1203,8 @@
                     loadCachedHistory(true);
                     checkRegressionAvailability();
                     loadRegressionSiteList();
-                    loadRegressionResults();
+                    if (_regViewMode === 'sites') loadSiteStatus();
+                    else loadRegressionResults();
                     return;
                 }
 
@@ -1199,7 +1263,8 @@
                     loadCachedHistory(true);
                     checkRegressionAvailability();
                     loadRegressionSiteList();
-                    loadRegressionResults();
+                    if (_regViewMode === 'sites') loadSiteStatus();
+                    else loadRegressionResults();
                 }
             } catch (error) {
                 document.getElementById('passphraseError').textContent = 'Error unlocking dashboard';
@@ -1214,17 +1279,9 @@
         });
 
         // ============================================================================
-        // Settings Modal
+        // Settings Page
         // ============================================================================
-        function showSettingsModal() {
-            document.getElementById('settingsOverlay').classList.add('visible');
-        }
-
-        function hideSettingsModal() {
-            document.getElementById('settingsOverlay').classList.remove('visible');
-        }
-
-        document.getElementById('settingsBtn').addEventListener('click', async () => {
+        async function loadSettingsData() {
             try {
                 const settings = await getSettings();
                 document.getElementById('urApiKey').value = settings.urApiKey || '';
@@ -1233,15 +1290,21 @@
                 document.getElementById('mwpUrl').value = settings.mwpUrl || '';
                 document.getElementById('mwpApiKey').value = settings.mwpApiKey || '';
                 document.getElementById('settingsStatus').style.display = 'none';
-                showSettingsModal();
+                // Restore refresh interval from localStorage
+                const saved = localStorage.getItem('refreshInterval');
+                if (saved) document.getElementById('refreshInterval').value = saved;
             } catch (error) {
-                alert('Failed to load settings');
+                showStatus('settingsStatus', 'Failed to load settings', 'error');
             }
-        });
+        }
 
-        document.getElementById('settingsCloseBtn').addEventListener('click', hideSettingsModal);
+        document.getElementById('settingsBtn').addEventListener('click', () => switchTab('settings'));
+        document.getElementById('sitesBtn').addEventListener('click', () => switchTab('sites'));
 
         document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('saveSettingsBtn');
+            btn.disabled = true;
+            btn.textContent = 'Saving…';
             const settings = {
                 urApiKey: document.getElementById('urApiKey').value.trim(),
                 cfApiToken: document.getElementById('cfApiToken').value.trim(),
@@ -1254,15 +1317,15 @@
                 const result = await saveSettings(settings);
                 if (result.ok) {
                     showStatus('settingsStatus', 'Settings saved successfully', 'success');
-                    setTimeout(() => {
-                        hideSettingsModal();
-                        loadAllData();
-                    }, 1000);
+                    setTimeout(() => loadAllData(), 1000);
                 } else {
                     showStatus('settingsStatus', 'Failed to save settings', 'error');
                 }
             } catch (error) {
                 showStatus('settingsStatus', 'Error saving settings', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Save Settings';
             }
         });
 
@@ -1297,10 +1360,7 @@
                 const result = await importData(base64);
                 if (result.ok) {
                     showStatus('settingsStatus', 'Settings imported successfully', 'success');
-                    setTimeout(() => {
-                        hideSettingsModal();
-                        loadAllData();
-                    }, 1000);
+                    setTimeout(() => loadAllData(), 1000);
                 }
             } catch (error) {
                 showStatus('settingsStatus', 'Import failed', 'error');
@@ -1402,19 +1462,33 @@
         });
 
         function switchTab(tabName) {
+            // Deactivate all tab-bar buttons and tab content
             document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
 
-            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+            // Deactivate header nav buttons
+            document.getElementById('sitesBtn').classList.remove('active');
+            document.getElementById('settingsBtn').classList.remove('active');
+
+            // Activate the right button — either in tab bar or header nav
+            const tabBarBtn = document.querySelector(`[data-tab="${tabName}"]`);
+            if (tabBarBtn) {
+                tabBarBtn.classList.add('active');
+            } else if (tabName === 'sites') {
+                document.getElementById('sitesBtn').classList.add('active');
+            } else if (tabName === 'settings') {
+                document.getElementById('settingsBtn').classList.add('active');
+            }
+
             document.getElementById(tabName).classList.add('active');
 
             appState.currentTab = tabName;
             if (tabName === 'history') {
                 loadDbStats();
-                // Only auto-load if the table is empty — don't clobber an active fetch
                 if (!historyData.length) loadCachedHistory(true);
             }
             if (tabName === 'sites' && !_sitesList.length) loadSitesTab();
+            if (tabName === 'settings') loadSettingsData();
         }
 
         // ============================================================================
@@ -2510,6 +2584,163 @@
         // Regression Tab
         // ============================================================================
         let _regressionPollTimer = null;
+        let _regViewMode = 'sites'; // 'sites' or 'runs'
+
+        function setRegView(mode) {
+            _regViewMode = mode;
+            document.getElementById('regViewSites').className = mode === 'sites' ? 'btn btn-primary' : 'btn';
+            document.getElementById('regViewRuns').className = mode === 'runs' ? 'btn btn-primary' : 'btn';
+            // Run-mode controls
+            document.getElementById('regressionRunSelect').style.display = mode === 'runs' ? '' : 'none';
+            document.getElementById('regressionDeleteBtn').style.display = 'none';
+            document.getElementById('regressionRunInfo').textContent = '';
+            if (mode === 'sites') {
+                loadSiteStatus();
+            } else {
+                loadRegressionRuns();
+                loadRegressionResults();
+            }
+        }
+
+        async function loadSiteStatus() {
+            try {
+                await _loadBaselines();
+                const resp = await fetch('/api/regression/site-status');
+                if (!resp.ok) {
+                    document.getElementById('regressionBody').innerHTML = '';
+                    document.getElementById('regressionEmpty').style.display = '';
+                    document.getElementById('regressionSummary').style.display = 'none';
+                    return;
+                }
+                const results = await resp.json();
+                renderSiteStatusTable(results);
+            } catch (e) {
+                document.getElementById('regressionStatus').textContent = `Error: ${e.message}`;
+            }
+        }
+
+        function renderSiteStatusTable(results) {
+            const tbody = document.getElementById('regressionBody');
+            const empty = document.getElementById('regressionEmpty');
+            const summary = document.getElementById('regressionSummary');
+
+            if (!results.length) {
+                tbody.innerHTML = '';
+                empty.style.display = '';
+                summary.style.display = 'none';
+                return;
+            }
+
+            empty.style.display = 'none';
+            summary.style.display = '';
+
+            // Summary stats
+            const total = results.length;
+            const withIssues = results.filter(r => r.has_issues).length;
+            const clean = total - withIssues;
+            const loadTimes = results.filter(r => r.load_time_ms).map(r => r.load_time_ms);
+            const avgLoad = loadTimes.length
+                ? Math.round(loadTimes.reduce((a, b) => a + b, 0) / loadTimes.length)
+                : null;
+
+            document.getElementById('regStatTotal').textContent = total;
+            document.getElementById('regStatClean').textContent = clean;
+            document.getElementById('regStatIssues').textContent = withIssues;
+            document.getElementById('regStatAvgLoad').textContent = avgLoad ? `${(avgLoad / 1000).toFixed(1)}s` : '—';
+
+            // Update table header for site-centric view
+            const thead = document.querySelector('#regressionTable thead tr');
+            thead.innerHTML = `
+                <th style="width:40px;">Status</th>
+                <th>Site</th>
+                <th>HTTP</th>
+                <th>Load Time</th>
+                <th>Diff Score</th>
+                <th>Last Checked</th>
+                <th style="width:80px;">Screenshot</th>
+            `;
+
+            // Sort: issues first, then alphabetical
+            results.sort((a, b) => {
+                if (a.has_issues !== b.has_issues) return b.has_issues - a.has_issues;
+                return (a.site_name || '').localeCompare(b.site_name || '');
+            });
+
+            tbody.innerHTML = results.map(r => {
+                const hasIssue = r.has_issues;
+                const icon = hasIssue ? '⚠️' : '✅';
+                const hasHttpError = r.http_status && r.http_status >= 400;
+                const rowBg = hasHttpError ? 'background: var(--red-bg);'
+                    : hasIssue ? 'background: var(--yellow-bg);' : '';
+
+                // HTTP status color
+                const httpColor = !r.http_status ? 'var(--text-muted)'
+                    : r.http_status < 300 ? 'var(--green)'
+                    : r.http_status < 400 ? 'var(--yellow)'
+                    : 'var(--red)';
+
+                // Load time
+                const lt = r.load_time_ms;
+                const loadStr = lt ? `${(lt / 1000).toFixed(1)}s` : '—';
+                const loadColor = !lt ? 'var(--text-muted)'
+                    : lt > 10000 ? 'var(--red)'
+                    : lt > 5000 ? 'var(--yellow)'
+                    : 'var(--text)';
+
+                // Diff score
+                let diffCell;
+                if (r.diff_score !== null && r.diff_score !== undefined) {
+                    const score = parseFloat(r.diff_score);
+                    const threshold = r.diff_threshold || 1.0;
+                    const diffColor = score === 0 ? 'var(--green)'
+                        : score < threshold ? 'var(--yellow)'
+                        : 'var(--red)';
+                    diffCell = `<span style="color:${diffColor}; font-weight:600; font-size:12px;">${score === 0 ? '0%' : score.toFixed(2) + '%'}</span>`;
+                } else {
+                    diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+                }
+
+                // Last checked — relative time
+                let lastChecked = '—';
+                const ts = r.run_started_at || r.checked_at;
+                if (ts) {
+                    const d = new Date(ts);
+                    const ago = Date.now() - d.getTime();
+                    if (ago < 3600000) lastChecked = `${Math.round(ago / 60000)}m ago`;
+                    else if (ago < 86400000) lastChecked = `${Math.round(ago / 3600000)}h ago`;
+                    else lastChecked = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                }
+
+                // Screenshot link
+                const screenshotHtml = r.screenshot_path
+                    ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name)}" style="color:var(--accent); font-size:12px;">View</a>`
+                    : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+
+                return `<tr style="${rowBg}">
+                    <td style="text-align:center;">${icon}</td>
+                    <td>
+                        <div style="font-weight:500;">${escapeHtml(r.site_name || '—')}</div>
+                        <div style="font-size:11px; color:var(--text-muted);">${escapeHtml((r.page_url || r.site_url || '').replace(/^https?:\/\//, ''))}</div>
+                        ${r.error ? `<div style="font-size:11px; color:var(--red); margin-top:2px;">${escapeHtml(r.error)}</div>` : ''}
+                    </td>
+                    <td style="color:${httpColor}; font-weight:500;">${r.http_status || '—'}</td>
+                    <td style="color:${loadColor};">${loadStr}</td>
+                    <td style="text-align:center;">${diffCell}</td>
+                    <td style="font-size:12px; color:var(--text-muted);">${lastChecked}</td>
+                    <td style="text-align:center;">${screenshotHtml}</td>
+                </tr>`;
+            }).join('');
+
+            // Wire screenshot links
+            tbody.querySelectorAll('.screenshot-link').forEach(link => {
+                link.addEventListener('click', e => {
+                    e.preventDefault();
+                    document.getElementById('screenshotImg').src = link.dataset.src;
+                    document.getElementById('screenshotTitle').textContent = link.dataset.site;
+                    document.getElementById('screenshotOverlay').style.display = 'flex';
+                });
+            });
+        }
 
         async function checkRegressionAvailability() {
             try {
@@ -2660,7 +2891,8 @@
                     document.getElementById('regressionRunBtn').style.display = '';
                     document.getElementById('regressionRunBtn').disabled = false;
                     document.getElementById('regressionCancelBtn').style.display = 'none';
-                    loadRegressionResults();
+                    if (_regViewMode === 'sites') loadSiteStatus();
+                    else loadRegressionResults();
                 }
             } catch (e) { /* ignore polling errors */ }
         }
@@ -2723,6 +2955,19 @@
             const summary = document.getElementById('regressionSummary');
             const info = document.getElementById('regressionRunInfo');
             const deleteBtn = document.getElementById('regressionDeleteBtn');
+
+            // Restore per-run table header
+            const thead = document.querySelector('#regressionTable thead tr');
+            thead.innerHTML = `
+                <th style="width:40px;">Status</th>
+                <th>Site</th>
+                <th>HTTP</th>
+                <th>Load Time</th>
+                <th>JS Errors</th>
+                <th>Broken Resources</th>
+                <th style="width:80px;">Screenshot</th>
+                <th style="width:90px;">Visual Diff</th>
+            `;
 
             _currentViewRunId = run.id || null;
 
@@ -3114,6 +3359,10 @@
             if (e.target === e.currentTarget) closeSiteSelectModal();
         });
 
+        // Wire view toggle buttons
+        document.getElementById('regViewSites').addEventListener('click', () => setRegView('sites'));
+        document.getElementById('regViewRuns').addEventListener('click', () => setRegView('runs'));
+
         // Wire the Run, Cancel, and Delete buttons
         document.getElementById('regressionRunBtn').addEventListener('click', startRegressionRun);
         document.getElementById('regressionCancelBtn').addEventListener('click', cancelRegressionRun);
@@ -3215,8 +3464,8 @@
         // ============================================================================
         // Sites Tab
         // ============================================================================
-        let _sitesList = [];        // full list from /api/sites
-        let _sitePanelId = null;    // site_id currently open in the panel
+        let _sitesList = [];
+        let _siteDetailId = null;
 
         async function loadSitesTab() {
             const status = document.getElementById('sitesStatus');
@@ -3246,14 +3495,14 @@
             tbody.innerHTML = _sitesList.map(s => {
                 let pages = [];
                 try { pages = JSON.parse(s.test_pages || '[]'); } catch {}
-                const pageCount = pages.length || 1; // always at least homepage
+                const pageCount = pages.length || 1;
                 const clientHtml = s.client_name
                     ? `<span style="color:var(--text);">${escapeHtml(s.client_name)}</span>`
                     : `<span style="color:var(--text-muted);">—</span>`;
                 const notesHtml = s.notes
                     ? `<span style="color:var(--text-muted); font-size:12px;" title="${escapeHtml(s.notes)}">${escapeHtml(s.notes.slice(0, 40))}${s.notes.length > 40 ? '…' : ''}</span>`
                     : `<span style="color:var(--text-muted);">—</span>`;
-                return `<tr>
+                return `<tr style="cursor:pointer;" data-site-id="${s.id}">
                     <td>
                         <div style="font-weight:500;">${escapeHtml(s.name)}</div>
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml((s.url || '').replace(/^https?:\/\//, ''))}</div>
@@ -3269,39 +3518,45 @@
                 </tr>`;
             }).join('');
 
+            tbody.querySelectorAll('tr[data-site-id]').forEach(row => {
+                row.addEventListener('click', (e) => {
+                    if (e.target.closest('.site-edit-btn')) return;
+                    openSiteDetail(row.dataset.siteId);
+                });
+            });
             tbody.querySelectorAll('.site-edit-btn').forEach(btn => {
-                btn.addEventListener('click', () => openSitePanel(btn.dataset.siteId));
+                btn.addEventListener('click', () => openSiteDetail(btn.dataset.siteId));
             });
         }
 
-        // ── Slide-out panel ──────────────────────────────────────────────────────────
-        function openSitePanel(siteId) {
+        // ── Site detail page ─────────────────────────────────────────────────────────
+        function openSiteDetail(siteId) {
             const site = _sitesList.find(s => String(s.id) === String(siteId));
             if (!site) return;
-            _sitePanelId = siteId;
+            _siteDetailId = siteId;
 
-            document.getElementById('sitePanelName').textContent = site.name;
-            document.getElementById('sitePanelUrl').textContent = site.url || '';
+            document.getElementById('siteDetailName').textContent = site.name;
+            document.getElementById('siteDetailUrl').textContent = site.url || '';
             document.getElementById('siteConfigClient').value = site.client_name || '';
             document.getElementById('siteConfigNotes').value = site.notes || '';
             document.getElementById('siteConfigDiffThreshold').value =
                 site.diff_threshold != null ? site.diff_threshold : 1.0;
+            document.getElementById('siteDetailStatus').style.display = 'none';
 
-            // Populate pages list
             let pages = [];
             try { pages = JSON.parse(site.test_pages || '[]'); } catch {}
             if (!pages.length) pages = [site.url || ''];
             renderPagesList(pages);
 
-            document.getElementById('sitePanelBackdrop').classList.add('open');
-            document.getElementById('sitePanel').classList.add('open');
+            document.getElementById('sitesListView').style.display = 'none';
+            document.getElementById('siteDetail').style.display = '';
             document.getElementById('siteConfigClient').focus();
         }
 
-        function closeSitePanel() {
-            document.getElementById('sitePanelBackdrop').classList.remove('open');
-            document.getElementById('sitePanel').classList.remove('open');
-            _sitePanelId = null;
+        function closeSiteDetail() {
+            document.getElementById('siteDetail').style.display = 'none';
+            document.getElementById('sitesListView').style.display = '';
+            _siteDetailId = null;
         }
 
         function renderPagesList(pages) {
@@ -3314,13 +3569,11 @@
                 </div>`
             ).join('');
             list.querySelectorAll('.page-remove-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    btn.closest('.page-row').remove();
-                });
+                btn.addEventListener('click', () => btn.closest('.page-row').remove());
             });
         }
 
-        function getPagesFromPanel() {
+        function getPagesFromDetail() {
             return [...document.querySelectorAll('.page-url-input')]
                 .map(i => i.value.trim())
                 .filter(Boolean);
@@ -3339,33 +3592,31 @@
             row.querySelector('input').focus();
         });
 
-        document.getElementById('sitePanelCloseBtn').addEventListener('click', closeSitePanel);
-        document.getElementById('sitePanelCancelBtn').addEventListener('click', closeSitePanel);
-        document.getElementById('sitePanelBackdrop').addEventListener('click', closeSitePanel);
+        document.getElementById('siteDetailBackBtn').addEventListener('click', closeSiteDetail);
 
-        document.getElementById('sitePanelSaveBtn').addEventListener('click', async () => {
-            if (!_sitePanelId) return;
-            const saveBtn = document.getElementById('sitePanelSaveBtn');
+        document.getElementById('siteDetailSaveBtn').addEventListener('click', async () => {
+            if (!_siteDetailId) return;
+            const saveBtn = document.getElementById('siteDetailSaveBtn');
             saveBtn.disabled = true;
             saveBtn.textContent = 'Saving…';
             const payload = {
                 client_name: document.getElementById('siteConfigClient').value.trim(),
                 notes: document.getElementById('siteConfigNotes').value.trim(),
-                test_pages: getPagesFromPanel(),
+                test_pages: getPagesFromDetail(),
                 diff_threshold: parseFloat(document.getElementById('siteConfigDiffThreshold').value) || 1.0,
             };
             try {
-                const resp = await fetch(`/api/sites/config/${_sitePanelId}`, {
+                const resp = await fetch(`/api/sites/config/${_siteDetailId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
                 });
                 const data = await resp.json();
                 if (data.error) throw new Error(data.error);
-                closeSitePanel();
-                await loadSitesTab(); // refresh table
+                showStatus('siteDetailStatus', 'Saved successfully', 'success');
+                await loadSitesTab();
             } catch (e) {
-                document.getElementById('sitesStatus').textContent = `Save failed: ${e.message}`;
+                showStatus('siteDetailStatus', `Save failed: ${e.message}`, 'error');
             } finally {
                 saveBtn.disabled = false;
                 saveBtn.textContent = 'Save Changes';
