@@ -4,6 +4,8 @@ Commands, endpoints, and URLs referenced during development.
 
 ## Contents
 
+- [Ubuntu Server (gunn-ubuntu-box)](#ubuntu-server-gunn-ubuntu-box)
+- [Backups](#backups)
 - [Running the Server](#running-the-server)
 - [Setup (First Time)](#setup-first-time)
 - [SQLite Database](#sqlite-database)
@@ -17,6 +19,224 @@ Commands, endpoints, and URLs referenced during development.
 - [Running Tests](#running-tests)
 - [Files](#files)
 - [Troubleshooting](#troubleshooting)
+
+---
+
+## Ubuntu Server (gunn-ubuntu-box)
+
+Always-on machine used for persistent dashboard hosting, scheduled regression runs, and Mailpit email interception.
+
+| Service         | URL                              | Notes                        |
+|-----------------|----------------------------------|------------------------------|
+| WSP Dashboard   | http://100.77.172.38:9111        | Accessible via Tailscale     |
+| Uptime Kuma     | http://100.77.172.38:3001        | Already running              |
+| Mailpit web UI  | http://100.77.172.38:8025        | Email catcher (see below)    |
+| Mailpit SMTP    | 100.77.172.38:1025               | For WP test-mode SMTP config |
+| SSH             | `ssh michael@100.77.172.38`      | Via Tailscale from any device|
+
+### First-Time Setup on Ubuntu
+
+```bash
+# 1. Make 'python' and 'pip' work (Ubuntu defaults to python3 only)
+sudo apt install -y python-is-python3 python3-pip
+
+# 2. System libraries required by Playwright's headless Chromium
+sudo apt install -y libglib2.0-0 libnss3 libnspr4 libatk1.0-0 \
+  libatk-bridge2.0-0 libcups2 libdrm2 libdbus-1-3 libxcb1 \
+  libxkbcommon0 libx11-6 libxcomposite1 libxdamage1 libxext6 \
+  libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2
+
+# 3. Install Python dependencies
+cd ~/wsp-dashboard
+pip install -r requirements.txt
+
+# 4. Install Playwright's Chromium binary (~150 MB)
+playwright install chromium
+
+# 5. First run — confirm it starts cleanly before setting up the service
+python server.py
+# Should log "Dashboard ready" and be reachable at http://100.77.172.38:9111
+```
+
+### systemd Service (Run on Boot)
+
+Create the service file:
+
+```bash
+sudo nano /etc/systemd/system/wsp-dashboard.service
+```
+
+Paste:
+
+```ini
+[Unit]
+Description=WSP Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=michael
+WorkingDirectory=/home/michael/wsp-dashboard
+ExecStart=/usr/bin/python /home/michael/wsp-dashboard/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable wsp-dashboard   # start on boot
+sudo systemctl start wsp-dashboard    # start now
+sudo systemctl status wsp-dashboard   # confirm running
+```
+
+Day-to-day service commands:
+
+```bash
+sudo systemctl restart wsp-dashboard   # after code updates
+sudo systemctl stop wsp-dashboard      # stop it
+sudo systemctl status wsp-dashboard    # check status
+journalctl -u wsp-dashboard -f         # tail live logs
+journalctl -u wsp-dashboard -n 100     # last 100 log lines
+```
+
+### Mailpit (Email Interception for Form Testing)
+
+Mailpit catches all outbound email during regression test runs so nothing reaches real clients. Required for Layer 5 (form testing).
+
+```bash
+# Start Mailpit (Docker) — runs permanently, restarts on reboot
+docker run -d --restart unless-stopped --name mailpit \
+  -p 8025:8025 -p 1025:1025 axllent/mailpit
+
+# Check it's running
+docker ps | grep mailpit
+
+# View logs
+docker logs mailpit
+
+# Stop / restart
+docker stop mailpit
+docker restart mailpit
+
+# Update to latest version
+docker pull axllent/mailpit
+docker stop mailpit && docker rm mailpit
+# then re-run the docker run command above
+```
+
+Mailpit web UI: **http://100.77.172.38:8025**
+When the WSP Plugin test-mode is built, sites will be configured to use SMTP host `100.77.172.38` port `1025` during test runs.
+
+### Deploying Code Updates
+
+Ubuntu is configured as a git remote. A normal push deploys to both origin and Ubuntu simultaneously:
+
+```bash
+git push   # pushes to both remotes — Ubuntu receives the update automatically
+```
+
+**Auto-restart on push** — set up a git post-receive hook on Ubuntu so the server restarts automatically whenever new code arrives. SSH into Ubuntu and run:
+
+```bash
+# Allow passwordless systemctl restart for the hook
+echo "michael ALL=(ALL) NOPASSWD: /bin/systemctl restart wsp-dashboard" \
+  | sudo tee /etc/sudoers.d/wsp-dashboard
+
+# Create the hook
+cat > ~/wsp-dashboard/.git/hooks/post-receive << 'EOF'
+#!/bin/bash
+echo "--- Restarting wsp-dashboard service ---"
+sudo systemctl restart wsp-dashboard
+echo "--- Done ---"
+EOF
+chmod +x ~/wsp-dashboard/.git/hooks/post-receive
+```
+
+After this is set up, every `git push` from your Mac will deploy and restart the server in one step. You'll see the restart confirmation in your push output.
+
+**Note:** `static/index.html` is served directly from disk — the server doesn't cache it, so frontend-only changes take effect immediately without a restart. Restarts are only strictly necessary when `.py` files change, but the hook restarts unconditionally for simplicity (it takes under a second).
+
+Manual restart if needed:
+
+```bash
+ssh michael@100.77.172.38 "sudo systemctl restart wsp-dashboard"
+```
+
+### Database Note
+
+`dashboard.db` on Ubuntu is separate from the copy on your Mac — configs, regression history, and site configs are **not** shared between machines. You'll need to re-enter your passphrase and API keys on first unlock via the Ubuntu URL.
+
+---
+
+## Backups
+
+### WSP Dashboard Database
+
+`dashboard.db` is a SQLite file. SQLite's `.backup` command produces a safe hot copy even while the server is running (safer than `cp` which can catch the file mid-write).
+
+**Manual backup:**
+
+```bash
+# Safe hot backup (run on Ubuntu)
+sqlite3 ~/wsp-dashboard/dashboard.db ".backup ~/wsp-dashboard/backups/dashboard-$(date +%F).db"
+
+# Pull a copy to your Mac
+scp michael@100.77.172.38:~/wsp-dashboard/dashboard.db ~/Desktop/dashboard-ubuntu-backup-$(date +%F).db
+```
+
+**Automated daily backup via cron** (set up once on Ubuntu):
+
+```bash
+# Create backup directory
+mkdir -p ~/wsp-dashboard/backups
+
+# Open crontab
+crontab -e
+```
+
+Add this line (runs at 2 AM daily, keeps last 14 days):
+
+```
+0 2 * * * sqlite3 /home/michael/wsp-dashboard/dashboard.db ".backup /home/michael/wsp-dashboard/backups/dashboard-$(date +\%F).db" && find /home/michael/wsp-dashboard/backups -name "dashboard-*.db" -mtime +14 -delete
+```
+
+Verify cron is working after a day:
+
+```bash
+ls -lh ~/wsp-dashboard/backups/
+```
+
+### Uptime Kuma Database
+
+Uptime Kuma stores its data in a Docker volume. Back it up by copying the SQLite file out of the container:
+
+```bash
+# Manual backup
+docker cp uptime-kuma:/app/data/kuma.db ~/uptime-kuma-backup-$(date +%F).db
+
+# Add to the same crontab line if you want it automated alongside the dashboard backup
+```
+
+To find where Docker has mounted the volume if the above path differs:
+
+```bash
+docker inspect uptime-kuma | grep -A5 Mounts
+```
+
+### Off-Site / Mac Backup
+
+Pull both databases to your Mac in one command:
+
+```bash
+scp michael@100.77.172.38:~/wsp-dashboard/dashboard.db \
+    michael@100.77.172.38:~/uptime-kuma-backup-*.db \
+    ~/Desktop/ubuntu-backups/
+```
 
 ---
 

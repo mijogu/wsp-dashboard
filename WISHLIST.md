@@ -137,9 +137,8 @@ Two components that compose well:
 **Goal:** Run regression checks automatically on a schedule rather than on-demand only.
 
 **Notes:**
-- Blocked on always-on machine — Michael is installing Ubuntu on a dedicated Mac for this
-- Once that machine is running the dashboard 24/7, scheduled runs become straightforward
-- The `schedule` skill is already available in the Cowork environment
+- ✅ Always-on Ubuntu machine is running at `100.77.172.38` with the dashboard deployed as a systemd service
+- Scheduling is now unblocked — ready to build
 - Suggested cadence: nightly Layer 1+3, weekly Layer 2 (visual diff), daily Layer 4 (URL snapshot)
 - Will want email/webhook alerting when issues are found (separate wishlist item)
 
