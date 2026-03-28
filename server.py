@@ -217,7 +217,7 @@ def main():
     class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
 
-    server = ThreadedHTTPServer(("127.0.0.1", PORT), DashboardHandler)
+    server = ThreadedHTTPServer(("0.0.0.0", PORT), DashboardHandler)
     unlocked = "YES (auto-unlocked)" if routes.get_passphrase() else "no (unlock in browser)"
     print(f"\n  WP Maintenance Dashboard")
     print(f"  ────────────────────────")
