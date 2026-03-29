@@ -140,24 +140,40 @@ Ubuntu is configured as a git remote. A normal push deploys to both origin and U
 git push   # pushes to both remotes — Ubuntu receives the update automatically
 ```
 
-**Auto-restart on push** — set up a git post-receive hook on Ubuntu so the server restarts automatically whenever new code arrives. SSH into Ubuntu and run:
+**Auto-restart on push** — a git post-receive hook on the Ubuntu bare repo pulls the latest code and restarts the service automatically on every push.
+
+The hook lives at `~/wsp-dashboard-remote.git/hooks/post-receive`. Two things must be set up first:
 
 ```bash
-# Allow passwordless systemctl restart for the hook
+# 1. Allow passwordless systemctl restart for the hook
 echo "michael ALL=(ALL) NOPASSWD: /bin/systemctl restart wsp-dashboard" \
   | sudo tee /etc/sudoers.d/wsp-dashboard
 
-# Create the hook
-cat > ~/wsp-dashboard/.git/hooks/post-receive << 'EOF'
-#!/bin/bash
-echo "--- Restarting wsp-dashboard service ---"
-sudo systemctl restart wsp-dashboard
-echo "--- Done ---"
-EOF
-chmod +x ~/wsp-dashboard/.git/hooks/post-receive
+# 2. Point ~/wsp-dashboard's origin at the local bare repo
+#    (so git pull works without needing GitHub auth)
+git -C ~/wsp-dashboard remote set-url origin /home/michael/wsp-dashboard-remote.git
 ```
 
-After this is set up, every `git push` from your Mac will deploy and restart the server in one step. You'll see the restart confirmation in your push output.
+Hook contents (`~/wsp-dashboard-remote.git/hooks/post-receive`):
+
+```bash
+#!/bin/bash
+echo "Deploying WSP Dashboard..."
+unset GIT_DIR
+cd /home/michael/wsp-dashboard
+git pull origin master
+pip install -r requirements.txt
+sudo systemctl restart wsp-dashboard
+echo "Done!"
+```
+
+```bash
+chmod +x ~/wsp-dashboard-remote.git/hooks/post-receive
+```
+
+After this is set up, every `git push` from your Mac deploys and restarts the server in one step. You'll see the pull output and restart confirmation in your push output.
+
+**Why `unset GIT_DIR`?** Git sets `GIT_DIR` to the bare repo path when running hooks. Without unsetting it, `git pull` inside `~/wsp-dashboard` would try to operate against the bare repo instead of `~/wsp-dashboard/.git`.
 
 **Note:** `static/index.html` is served directly from disk — the server doesn't cache it, so frontend-only changes take effect immediately without a restart. Restarts are only strictly necessary when `.py` files change, but the hook restarts unconditionally for simplicity (it takes under a second).
 
