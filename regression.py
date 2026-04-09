@@ -289,7 +289,7 @@ def run_checks(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                 user_agent=(
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
+                    "Chrome/135.0.0.0 Safari/537.36"
                 ),
                 extra_http_headers={
                     "Accept": (
@@ -447,6 +447,10 @@ def run_checks(sites: list, add_log_fn, save_result_fn, finish_run_fn,
 
                     # Update progress
                     _active_run["checked"] += 1
+
+                    # Brief pause between page checks — avoids triggering WAF
+                    # rate-limiting (SiteGround, Cloudflare, Wordfence, etc.)
+                    time.sleep(2)
                     _active_run["issues_found"] = issues_found
 
                     # Log result
