@@ -2649,11 +2649,14 @@
         }
 
         function renderSiteStatusTable(results) {
+            if (results) _lastSiteStatusResults = results;
+            const data = _lastSiteStatusResults;
+
             const tbody = document.getElementById('regressionBody');
             const empty = document.getElementById('regressionEmpty');
             const summary = document.getElementById('regressionSummary');
 
-            if (!results.length) {
+            if (!data.length) {
                 tbody.innerHTML = '';
                 empty.style.display = '';
                 summary.style.display = 'none';
@@ -2664,10 +2667,10 @@
             summary.style.display = '';
 
             // Summary stats
-            const total = results.length;
-            const withIssues = results.filter(r => r.has_issues).length;
+            const total = data.length;
+            const withIssues = data.filter(r => r.has_issues).length;
             const clean = total - withIssues;
-            const loadTimes = results.filter(r => r.load_time_ms).map(r => r.load_time_ms);
+            const loadTimes = data.filter(r => r.load_time_ms).map(r => r.load_time_ms);
             const avgLoad = loadTimes.length
                 ? Math.round(loadTimes.reduce((a, b) => a + b, 0) / loadTimes.length)
                 : null;
@@ -2677,39 +2680,50 @@
             document.getElementById('regStatIssues').textContent = withIssues;
             document.getElementById('regStatAvgLoad').textContent = avgLoad ? `${(avgLoad / 1000).toFixed(1)}s` : '—';
 
-            // Update table header for site-centric view
+            // Sortable header
             const thead = document.querySelector('#regressionTable thead tr');
-            thead.innerHTML = `
-                <th style="width:40px;">Status</th>
-                <th>Site</th>
-                <th>HTTP</th>
-                <th>Load Time</th>
-                <th>JS Errors</th>
-                <th>Diff</th>
-                <th>Last Checked</th>
-                <th style="width:80px;">Screenshot</th>
-            `;
+            thead.innerHTML =
+                `<th style="width:40px;">Status</th>` +
+                _sortTh('Site', 'site', _regSiteSort) +
+                _sortTh('HTTP', 'http', _regSiteSort) +
+                _sortTh('Load Time', 'load', _regSiteSort) +
+                _sortTh('JS Errors', 'js', _regSiteSort) +
+                _sortTh('Diff', 'diff', _regSiteSort) +
+                _sortTh('Last Checked', 'checked', _regSiteSort) +
+                `<th style="width:80px;">Screenshot</th>`;
 
-            // Sort: issues first, then alphabetical
-            results.sort((a, b) => {
-                if (a.has_issues !== b.has_issues) return b.has_issues - a.has_issues;
-                return (a.site_name || '').localeCompare(b.site_name || '');
+            thead.querySelectorAll('[data-sort-col]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const col = th.dataset.sortCol;
+                    if (_regSiteSort.col === col) _regSiteSort.dir *= -1;
+                    else { _regSiteSort.col = col; _regSiteSort.dir = 1; }
+                    renderSiteStatusTable();
+                });
             });
 
-            tbody.innerHTML = results.map(r => {
+            // Apply sort (default: issues first, then alpha)
+            let sorted;
+            if (_regSiteSort.col) {
+                sorted = _sortRegData(data, _regSiteSort.col, _regSiteSort.dir);
+            } else {
+                sorted = [...data].sort((a, b) => {
+                    if (a.has_issues !== b.has_issues) return b.has_issues - a.has_issues;
+                    return (a.site_name || '').localeCompare(b.site_name || '');
+                });
+            }
+
+            tbody.innerHTML = sorted.map((r, idx) => {
                 const hasIssue = r.has_issues;
                 const icon = hasIssue ? '⚠️' : '✅';
                 const hasHttpError = r.http_status && r.http_status >= 400;
                 const rowBg = hasHttpError ? 'background: var(--red-bg);'
                     : hasIssue ? 'background: var(--yellow-bg);' : '';
 
-                // HTTP status color
                 const httpColor = !r.http_status ? 'var(--text-muted)'
                     : r.http_status < 300 ? 'var(--green)'
                     : r.http_status < 400 ? 'var(--yellow)'
                     : 'var(--red)';
 
-                // Load time
                 const lt = r.load_time_ms;
                 const loadStr = lt ? `${(lt / 1000).toFixed(1)}s` : '—';
                 const loadColor = !lt ? 'var(--text-muted)'
@@ -2717,13 +2731,13 @@
                     : lt > 5000 ? 'var(--yellow)'
                     : 'var(--text)';
 
-                // JS errors
                 const jsErrs = safeJsonParse(r.js_errors, []);
                 const jsErrCell = jsErrs.length
-                    ? `<span style="color:var(--red); font-size:12px;">${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
+                    ? `<span class="reg-detail-toggle" data-target="site-js-${idx}"
+                          style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
+                          >${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
                     : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
 
-                // Diff score
                 let diffCell;
                 if (r.diff_score !== null && r.diff_score !== undefined) {
                     const score = parseFloat(r.diff_score);
@@ -2736,7 +2750,6 @@
                     diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
                 }
 
-                // Last checked — relative time
                 let lastChecked = '—';
                 const ts = r.run_started_at || r.checked_at;
                 if (ts) {
@@ -2747,10 +2760,17 @@
                     else lastChecked = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 }
 
-                // Screenshot link
                 const screenshotHtml = r.screenshot_path
                     ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name)}" style="color:var(--accent); font-size:12px;">View</a>`
                     : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+
+                const jsDetailRow = jsErrs.length ? `
+                    <tr id="site-js-${idx}" style="display:none; background:var(--surface-2);">
+                        <td></td><td colspan="7" style="padding:6px 12px;">
+                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">JS ERRORS</div>
+                            ${jsErrs.map(e => `<div style="font-family:monospace; font-size:11px; color:var(--red); margin-bottom:2px;">${escapeHtml(String(e))}</div>`).join('')}
+                        </td>
+                    </tr>` : '';
 
                 return `<tr style="${rowBg} cursor:pointer;"
                     data-site-id="${r.site_id}"
@@ -2768,10 +2788,10 @@
                     <td style="text-align:center;">${diffCell}</td>
                     <td style="font-size:12px; color:var(--text-muted);">${lastChecked}</td>
                     <td style="text-align:center;">${screenshotHtml}</td>
-                </tr>`;
+                </tr>${jsDetailRow}`;
             }).join('');
 
-            // Wire screenshot links
+            // Wire interactive elements
             tbody.querySelectorAll('.screenshot-link').forEach(link => {
                 link.addEventListener('click', e => {
                     e.preventDefault();
@@ -2781,10 +2801,18 @@
                 });
             });
 
-            // Wire row clicks → site history drill-down
+            tbody.querySelectorAll('.reg-detail-toggle').forEach(el => {
+                el.addEventListener('click', e => {
+                    e.stopPropagation();
+                    const target = document.getElementById(el.dataset.target);
+                    if (target) target.style.display = target.style.display === 'none' ? '' : 'none';
+                });
+            });
+
+            // Row click → history (skip if an interactive element was clicked)
             tbody.querySelectorAll('tr[data-site-id]').forEach(row => {
                 row.addEventListener('click', e => {
-                    if (e.target.closest('.screenshot-link')) return;
+                    if (e.target.closest('a, button, .reg-detail-toggle')) return;
                     openSiteRegHistory(row.dataset.siteId, row.dataset.siteName, row.dataset.siteUrl);
                 });
             });
@@ -3081,7 +3109,39 @@
             loadRegressionResults(e.target.value);
         });
 
-        let _currentRunData = null;  // last rendered run — used to re-render after baseline changes
+        let _currentRunData = null;
+        let _lastSiteStatusResults = [];
+        let _regSiteSort = { col: null, dir: 1 };   // null col = default (issues-first)
+        let _regRunSort  = { col: null, dir: 1 };
+
+        // Sortable-column helpers
+        function _sortTh(label, col, sort, style = '') {
+            const active = sort.col === col;
+            const arrow = active ? (sort.dir === 1 ? ' ▲' : ' ▼') : '';
+            const bg = active ? 'background:var(--surface-2); ' : '';
+            return `<th style="${bg}cursor:pointer; user-select:none; ${style}" data-sort-col="${col}">${label}${arrow}</th>`;
+        }
+
+        function _sortRegData(arr, col, dir) {
+            if (!col) return arr;
+            return [...arr].sort((a, b) => {
+                let av, bv;
+                switch (col) {
+                    case 'status': av = a.has_issues ? 1 : 0; bv = b.has_issues ? 1 : 0; break;
+                    case 'site':   av = (a.site_name || '').toLowerCase(); bv = (b.site_name || '').toLowerCase(); break;
+                    case 'http':   av = a.http_status || 0;  bv = b.http_status || 0;  break;
+                    case 'load':   av = a.load_time_ms || 0; bv = b.load_time_ms || 0; break;
+                    case 'js':     av = safeJsonParse(a.js_errors, []).length; bv = safeJsonParse(b.js_errors, []).length; break;
+                    case 'broken': av = safeJsonParse(a.broken_resources, []).length; bv = safeJsonParse(b.broken_resources, []).length; break;
+                    case 'diff':   av = a.diff_score ?? -1;  bv = b.diff_score ?? -1;  break;
+                    case 'checked': av = a.run_started_at || a.checked_at || ''; bv = b.run_started_at || b.checked_at || ''; break;
+                    default: return 0;
+                }
+                if (av < bv) return -dir;
+                if (av > bv) return dir;
+                return 0;
+            });
+        }
 
         function renderRegressionResults(run) {
             _currentRunData = run;
@@ -3092,18 +3152,27 @@
             const info = document.getElementById('regressionRunInfo');
             const deleteBtn = document.getElementById('regressionDeleteBtn');
 
-            // Restore per-run table header
+            // Restore per-run table header (sortable)
             const thead = document.querySelector('#regressionTable thead tr');
-            thead.innerHTML = `
-                <th style="width:40px;">Status</th>
-                <th>Site</th>
-                <th>HTTP</th>
-                <th>Load Time</th>
-                <th>JS Errors</th>
-                <th>Broken Resources</th>
-                <th style="width:80px;">Screenshot</th>
-                <th style="width:90px;">Diff</th>
-            `;
+            thead.innerHTML =
+                `<th style="width:40px;">Status</th>` +
+                _sortTh('Site', 'site', _regRunSort) +
+                _sortTh('HTTP', 'http', _regRunSort) +
+                _sortTh('Load Time', 'load', _regRunSort) +
+                _sortTh('JS Errors', 'js', _regRunSort) +
+                _sortTh('Broken Resources', 'broken', _regRunSort) +
+                `<th style="width:80px;">Screenshot</th>` +
+                _sortTh('Diff', 'diff', _regRunSort, 'width:90px;');
+
+            // Wire header sort clicks
+            thead.querySelectorAll('th[data-sort-col]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const col = th.dataset.sortCol;
+                    if (_regRunSort.col === col) _regRunSort.dir *= -1;
+                    else { _regRunSort.col = col; _regRunSort.dir = 1; }
+                    renderRegressionResults(_currentRunData);
+                });
+            });
 
             _currentViewRunId = run.id || null;
 
@@ -3140,8 +3209,20 @@
                 info.textContent = `Run: ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
             }
 
+            // Apply sort (default: issues first, then alpha by site name)
+            let sorted;
+            if (_regRunSort.col) {
+                sorted = _sortRegData(results, _regRunSort.col, _regRunSort.dir);
+            } else {
+                sorted = [...results].sort((a, b) => {
+                    const ai = a.has_issues ? 0 : 1, bi = b.has_issues ? 0 : 1;
+                    if (ai !== bi) return ai - bi;
+                    return (a.site_name || '').toLowerCase().localeCompare((b.site_name || '').toLowerCase());
+                });
+            }
+
             // Render table rows with expandable detail rows
-            tbody.innerHTML = results.map((r, idx) => {
+            tbody.innerHTML = sorted.map((r, idx) => {
                 const jsErrors = safeJsonParse(r.js_errors, []);
                 const broken = safeJsonParse(r.broken_resources, []);
                 const hasIssue = r.has_issues;
