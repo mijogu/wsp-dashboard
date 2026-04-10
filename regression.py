@@ -286,7 +286,7 @@ def run_checks(sites: list, add_log_fn, save_result_fn, finish_run_fn,
             )
             context = browser.new_context(
                 viewport={"width": 1280, "height": 720},
-                user_agent="WSP-Dashboard/1.0 Regression-Monitor (+mike@darngood.io)",
+                user_agent="WSP-Dashboard/1.0 Regression-Monitor (+mgunn@blueblazeassociates.com)",
                 extra_http_headers={
                     "Accept": (
                         "text/html,application/xhtml+xml,application/xml;"

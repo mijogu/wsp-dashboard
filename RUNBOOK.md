@@ -442,7 +442,7 @@ Navigate to the **Regression** tab in the dashboard and click **Run Site Check**
 Regression checks use a custom user agent that identifies the service rather than impersonating a browser:
 
 ```
-WSP-Dashboard/1.0 Regression-Monitor (+mike@darngood.io)
+WSP-Dashboard/1.0 Regression-Monitor (+mgunn@blueblazeassociates.com)
 ```
 
 This is intentionally transparent — it makes requests easier for hosting providers to allowlist and avoids being flagged as a bot.
