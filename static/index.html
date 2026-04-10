@@ -797,7 +797,7 @@
             </div>
 
             <!-- Results table -->
-            <div class="log-table-wrap">
+            <div id="regressionTableWrap" class="log-table-wrap">
                 <table class="log-table" id="regressionTable">
                     <thead>
                         <tr>
@@ -808,13 +808,39 @@
                             <th>JS Errors</th>
                             <th>Broken Resources</th>
                             <th style="width:80px;">Screenshot</th>
-                            <th style="width:90px;">Visual Diff</th>
+                            <th style="width:90px;">Diff</th>
                         </tr>
                     </thead>
                     <tbody id="regressionBody"></tbody>
                 </table>
                 <div id="regressionEmpty" class="empty-state">
                     No regression results yet. Click "Run Site Check" to scan all sites.
+                </div>
+            </div>
+
+            <!-- Per-site history panel -->
+            <div id="siteHistoryPanel" style="display:none;">
+                <div style="display:flex; align-items:center; gap:12px; padding:12px 0 12px;">
+                    <button class="btn" id="siteHistoryBackBtn" style="font-size:12px; padding:4px 10px;">&#x2190; All Sites</button>
+                    <div>
+                        <div id="siteHistoryTitle" style="font-size:14px; font-weight:600;"></div>
+                        <div id="siteHistoryUrl" style="font-size:11px; color:var(--text-muted);"></div>
+                    </div>
+                </div>
+                <div class="log-table-wrap">
+                    <table class="log-table" id="siteHistoryTable">
+                        <thead><tr>
+                            <th style="width:40px;">Status</th>
+                            <th>Date</th>
+                            <th>HTTP</th>
+                            <th>Load Time</th>
+                            <th>JS Errors</th>
+                            <th>Diff</th>
+                            <th style="width:80px;">Screenshot</th>
+                        </tr></thead>
+                        <tbody id="siteHistoryBody"></tbody>
+                    </table>
+                    <div id="siteHistoryEmpty" class="empty-state" style="display:none;">No history yet for this site.</div>
                 </div>
             </div>
 
@@ -840,39 +866,43 @@
                 </div>
             </div>
 
-            <!-- Screenshot modal — override overlay to scroll, top-align, and not clip tall images -->
-            <div id="screenshotOverlay" class="modal-overlay" style="z-index:250; align-items:flex-start; overflow-y:auto; padding:40px 0;">
-                <div class="modal" style="max-width:900px; width:90vw; padding:10px; margin:0 auto;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; position:sticky; top:0; background:var(--surface); z-index:1; border-radius:10px 10px 0 0;">
+            <!-- Screenshot modal -->
+            <div id="screenshotOverlay" class="modal-overlay" style="z-index:250; align-items:flex-start; overflow:hidden; padding:40px 0;">
+                <div class="modal" style="max-width:900px; width:90vw; padding:0; margin:0 auto; display:flex; flex-direction:column; max-height:calc(100vh - 80px); overflow:hidden;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--surface); border-radius:10px 10px 0 0; flex-shrink:0;">
                         <h3 id="screenshotTitle" style="font-size:14px; font-weight:600;">Screenshot</h3>
                         <button class="btn" id="screenshotCloseBtn" style="font-size:12px; padding:4px 10px;">✕ Close</button>
                     </div>
-                    <img id="screenshotImg" style="width:100%; border-radius:0 0 6px 6px; border:1px solid var(--border);" src="" alt="Screenshot">
+                    <div style="overflow-y:auto; flex:1;">
+                        <img id="screenshotImg" style="width:100%; border-radius:0 0 6px 6px; border:1px solid var(--border); display:block;" src="" alt="Screenshot">
+                    </div>
                 </div>
             </div>
 
             <!-- Visual diff comparison viewer -->
-            <div id="diffOverlay" class="modal-overlay" style="z-index:260; align-items:flex-start; overflow-y:auto; padding:30px 0;">
-                <div class="modal" style="max-width:1200px; width:95vw; padding:10px; margin:0 auto;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; position:sticky; top:0; background:var(--surface); z-index:1; border-radius:10px 10px 0 0; border-bottom:1px solid var(--border);">
+            <div id="diffOverlay" class="modal-overlay" style="z-index:260; align-items:flex-start; overflow:hidden; padding:30px 0;">
+                <div class="modal" style="max-width:1200px; width:95vw; padding:0; margin:0 auto; display:flex; flex-direction:column; max-height:calc(100vh - 60px); overflow:hidden;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--surface); border-radius:10px 10px 0 0; border-bottom:1px solid var(--border); flex-shrink:0;">
                         <div>
                             <h3 id="diffTitle" style="font-size:14px; font-weight:600; margin:0;">Visual Diff</h3>
                             <div id="diffSubtitle" style="font-size:11px; color:var(--text-muted); margin-top:2px;"></div>
                         </div>
                         <button class="btn" id="diffCloseBtn" style="font-size:12px; padding:4px 10px;">✕ Close</button>
                     </div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:10px;">
-                        <div>
-                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Baseline</div>
-                            <img id="diffBaselineImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Baseline">
-                        </div>
-                        <div>
-                            <div style="font-size:11px; font-weight:600; color:var(--yellow); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Diff (red = changed)</div>
-                            <img id="diffDiffImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Diff">
-                        </div>
-                        <div>
-                            <div style="font-size:11px; font-weight:600; color:var(--accent); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Current</div>
-                            <img id="diffCurrentImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Current">
+                    <div style="overflow-y:auto; flex:1;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:10px;">
+                            <div>
+                                <div style="font-size:11px; font-weight:600; color:var(--text-muted); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Previous</div>
+                                <img id="diffBaselineImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Previous">
+                            </div>
+                            <div>
+                                <div style="font-size:11px; font-weight:600; color:var(--yellow); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Diff (red = changed)</div>
+                                <img id="diffDiffImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Diff">
+                            </div>
+                            <div>
+                                <div style="font-size:11px; font-weight:600; color:var(--accent); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Current</div>
+                                <img id="diffCurrentImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Current">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2604,7 +2634,6 @@
 
         async function loadSiteStatus() {
             try {
-                await _loadBaselines();
                 const resp = await fetch('/api/regression/site-status');
                 if (!resp.ok) {
                     document.getElementById('regressionBody').innerHTML = '';
@@ -2655,7 +2684,8 @@
                 <th>Site</th>
                 <th>HTTP</th>
                 <th>Load Time</th>
-                <th>Diff Score</th>
+                <th>JS Errors</th>
+                <th>Diff</th>
                 <th>Last Checked</th>
                 <th style="width:80px;">Screenshot</th>
             `;
@@ -2687,6 +2717,12 @@
                     : lt > 5000 ? 'var(--yellow)'
                     : 'var(--text)';
 
+                // JS errors
+                const jsErrs = safeJsonParse(r.js_errors, []);
+                const jsErrCell = jsErrs.length
+                    ? `<span style="color:var(--red); font-size:12px;">${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
+                    : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
+
                 // Diff score
                 let diffCell;
                 if (r.diff_score !== null && r.diff_score !== undefined) {
@@ -2716,15 +2752,19 @@
                     ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name)}" style="color:var(--accent); font-size:12px;">View</a>`
                     : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
 
-                return `<tr style="${rowBg}">
+                return `<tr style="${rowBg} cursor:pointer;"
+                    data-site-id="${r.site_id}"
+                    data-site-name="${escapeHtml(r.site_name || '')}"
+                    data-site-url="${escapeHtml(r.page_url || r.site_url || '')}">
                     <td style="text-align:center;">${icon}</td>
                     <td>
-                        <div style="font-weight:500;">${escapeHtml(r.site_name || '—')}</div>
+                        <div style="font-weight:500;">${escapeHtml(r.site_name || '—')} <span style="color:var(--text-muted); font-size:11px;">›</span></div>
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml((r.page_url || r.site_url || '').replace(/^https?:\/\//, ''))}</div>
                         ${r.error ? `<div style="font-size:11px; color:var(--red); margin-top:2px;">${escapeHtml(r.error)}</div>` : ''}
                     </td>
                     <td style="color:${httpColor}; font-weight:500;">${r.http_status || '—'}</td>
                     <td style="color:${loadColor};">${loadStr}</td>
+                    <td>${jsErrCell}</td>
                     <td style="text-align:center;">${diffCell}</td>
                     <td style="font-size:12px; color:var(--text-muted);">${lastChecked}</td>
                     <td style="text-align:center;">${screenshotHtml}</td>
@@ -2740,7 +2780,105 @@
                     document.getElementById('screenshotOverlay').style.display = 'flex';
                 });
             });
+
+            // Wire row clicks → site history drill-down
+            tbody.querySelectorAll('tr[data-site-id]').forEach(row => {
+                row.addEventListener('click', e => {
+                    if (e.target.closest('.screenshot-link')) return;
+                    openSiteRegHistory(row.dataset.siteId, row.dataset.siteName, row.dataset.siteUrl);
+                });
+            });
         }
+
+        // ── Per-site regression history ──────────────────────────────────────────────
+        let _currentHistorySiteId = null;
+
+        function openSiteRegHistory(siteId, siteName, siteUrl) {
+            _currentHistorySiteId = siteId;
+            document.getElementById('siteHistoryTitle').textContent = siteName;
+            document.getElementById('siteHistoryUrl').textContent = siteUrl || '';
+            document.getElementById('regressionTableWrap').style.display = 'none';
+            document.getElementById('regressionSummary').style.display = 'none';
+            document.getElementById('siteHistoryPanel').style.display = '';
+            loadSiteRegHistory(siteId);
+        }
+
+        function closeSiteRegHistory() {
+            _currentHistorySiteId = null;
+            document.getElementById('siteHistoryPanel').style.display = 'none';
+            document.getElementById('regressionTableWrap').style.display = '';
+            document.getElementById('regressionSummary').style.display = '';
+        }
+
+        async function loadSiteRegHistory(siteId) {
+            const tbody = document.getElementById('siteHistoryBody');
+            const empty = document.getElementById('siteHistoryEmpty');
+            tbody.innerHTML = `<tr><td colspan="7" style="color:var(--text-muted); padding:20px; text-align:center;">Loading…</td></tr>`;
+            empty.style.display = 'none';
+            try {
+                const resp = await fetch(`/api/regression/site/${siteId}/history`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const results = await resp.json();
+                if (!results.length) {
+                    tbody.innerHTML = '';
+                    empty.style.display = '';
+                    return;
+                }
+                tbody.innerHTML = results.map(r => {
+                    const icon = r.has_issues ? '⚠️' : '✅';
+                    const httpColor = !r.http_status ? 'var(--text-muted)'
+                        : r.http_status < 300 ? 'var(--green)'
+                        : r.http_status < 400 ? 'var(--yellow)'
+                        : 'var(--red)';
+                    const lt = r.load_time_ms;
+                    const loadStr = lt ? `${(lt / 1000).toFixed(1)}s` : '—';
+                    const jsErrs = safeJsonParse(r.js_errors, []);
+                    const jsCell = jsErrs.length
+                        ? `<span style="color:var(--red); font-size:12px;">${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
+                        : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
+                    let diffCell;
+                    if (r.diff_score !== null && r.diff_score !== undefined) {
+                        const score = parseFloat(r.diff_score);
+                        const threshold = r.diff_threshold ?? 1.0;
+                        const diffColor = score === 0 ? 'var(--green)'
+                            : score < threshold ? 'var(--yellow)' : 'var(--red)';
+                        diffCell = `<span style="color:${diffColor}; font-size:12px; font-weight:600;">${score === 0 ? '0%' : score.toFixed(2) + '%'}</span>`;
+                    } else {
+                        diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+                    }
+                    const screenshotHtml = r.screenshot_path
+                        ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name || '')}" style="color:var(--accent); font-size:12px;">View</a>`
+                        : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+                    const ts = r.run_started_at || r.checked_at;
+                    const dateStr = ts ? new Date(ts).toLocaleDateString('en-US',
+                        { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+                    return `<tr>
+                        <td style="text-align:center;">${icon}</td>
+                        <td style="font-size:12px; color:var(--text-muted);">${dateStr}</td>
+                        <td style="color:${httpColor}; font-weight:500;">${r.http_status || '—'}</td>
+                        <td>${loadStr}</td>
+                        <td>${jsCell}</td>
+                        <td style="text-align:center;">${diffCell}</td>
+                        <td style="text-align:center;">${screenshotHtml}</td>
+                    </tr>`;
+                }).join('');
+                tbody.querySelectorAll('.screenshot-link').forEach(link => {
+                    link.addEventListener('click', e => {
+                        e.preventDefault();
+                        document.getElementById('screenshotImg').src = link.dataset.src;
+                        document.getElementById('screenshotTitle').textContent = link.dataset.site;
+                        document.getElementById('screenshotOverlay').style.display = 'flex';
+                    });
+                });
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="7" style="color:var(--red); padding:12px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        document.getElementById('siteHistoryBackBtn').addEventListener('click', () => {
+            closeSiteRegHistory();
+            loadSiteStatus();
+        });
 
         async function checkRegressionAvailability() {
             try {
@@ -2919,8 +3057,6 @@
         // ── Load results (latest or by run_id) ──────────────────────────────────
         async function loadRegressionResults(runId) {
             try {
-                // Load baselines in parallel with results so diff cells render correctly
-                await _loadBaselines();
                 const url = runId
                     ? `/api/regression/results/${runId}`
                     : '/api/regression/latest';
@@ -2966,7 +3102,7 @@
                 <th>JS Errors</th>
                 <th>Broken Resources</th>
                 <th style="width:80px;">Screenshot</th>
-                <th style="width:90px;">Visual Diff</th>
+                <th style="width:90px;">Diff</th>
             `;
 
             _currentViewRunId = run.id || null;
@@ -3053,44 +3189,26 @@
                     ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name)}" style="color:var(--accent); font-size:12px;">View</a>`
                     : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
 
-                // Visual diff cell
+                // Diff cell — auto-compare to previous run, no manual baseline needed
                 let diffCell;
                 if (r.diff_score !== null && r.diff_score !== undefined) {
                     const score = parseFloat(r.diff_score);
-                    // Threshold: use site-level config if loaded, else fall back to 1%
-                    const siteThreshold = (_baselinesBySite[String(r.site_id)] || {})._threshold ?? 1.0;
+                    const threshold = r.diff_threshold ?? 1.0;
                     const diffColor = score === 0 ? 'var(--green)'
-                        : score < siteThreshold ? 'var(--yellow)'
+                        : score < threshold ? 'var(--yellow)'
                         : 'var(--red)';
-                    const diffLabel = score === 0 ? '0% — no change'
-                        : `${score.toFixed(2)}%`;
-                    const hasCompare = r.diff_screenshot_path && r.screenshot_path;
-                    diffCell = `<div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
-                        <span class="${hasCompare ? 'diff-score-link' : ''}"
-                              style="color:${diffColor}; font-size:12px; font-weight:600; ${hasCompare ? 'cursor:pointer; text-decoration:underline;' : ''}"
-                              data-baseline="${encodeURIComponent(r.diff_screenshot_path ? ('baseline_' + r.site_id + '_' + encodeURIComponent(r.page_url || r.site_url)) : '')}"
-                              data-diff="${r.diff_screenshot_path ? encodeURIComponent(r.diff_screenshot_path) : ''}"
-                              data-current="${r.screenshot_path ? encodeURIComponent(r.screenshot_path) : ''}"
-                              data-site="${escapeHtml(r.site_name)}"
-                              data-score="${score}"
-                              data-result-id="${r.id}"
-                              data-site-id="${r.site_id}"
-                              data-page-url="${escapeHtml(r.page_url || r.site_url || '')}"
-                              >${diffLabel}</span>
-                        ${r.screenshot_path ? `<button class="set-baseline-btn" data-result-id="${r.id}" style="font-size:10px; padding:2px 6px; cursor:pointer; color:var(--text-muted); background:var(--surface-2); border:1px solid var(--border); border-radius:3px; white-space:nowrap;">Set Baseline</button>` : ''}
-                    </div>`;
-                } else if (r.screenshot_path) {
-                    // Check if a baseline has been set for this site/page (even if this result predates it)
-                    const pageKey = r.page_url || r.site_url || '';
-                    const existingBaseline = (_baselinesBySite[String(r.site_id)] || {})[pageKey];
-                    const statusLabel = existingBaseline
-                        ? '<span style="color:var(--green); font-size:11px;">Baseline set</span><br><span style="color:var(--text-muted); font-size:10px;">Run again to compare</span>'
-                        : '<span style="color:var(--text-muted); font-size:11px;">No baseline</span>';
-                    const btnLabel = existingBaseline ? 'Update Baseline' : 'Set Baseline';
-                    diffCell = `<div style="text-align:center;">
-                        ${statusLabel}<br>
-                        <button class="set-baseline-btn" data-result-id="${r.id}" style="font-size:10px; padding:2px 6px; cursor:pointer; color:var(--text-muted); background:var(--surface-2); border:1px solid var(--border); border-radius:3px; margin-top:3px; white-space:nowrap;">${btnLabel}</button>
-                    </div>`;
+                    const hasCompare = r.diff_screenshot_path && r.prev_screenshot_path;
+                    diffCell = `<span class="${hasCompare ? 'diff-score-link' : ''}"
+                        style="color:${diffColor}; font-size:12px; font-weight:600; ${hasCompare ? 'cursor:pointer; text-decoration:underline;' : ''}"
+                        data-prev="${r.prev_screenshot_path ? encodeURIComponent(r.prev_screenshot_path) : ''}"
+                        data-diff="${r.diff_screenshot_path ? encodeURIComponent(r.diff_screenshot_path) : ''}"
+                        data-current="${r.screenshot_path ? encodeURIComponent(r.screenshot_path) : ''}"
+                        data-site="${escapeHtml(r.site_name)}"
+                        data-score="${score}"
+                        data-result-id="${r.id}"
+                        data-site-id="${r.site_id}"
+                        data-page-url="${escapeHtml(r.page_url || r.site_url || '')}"
+                        >${score === 0 ? '0% — no change' : score.toFixed(2) + '%'}</span>`;
                 } else {
                     diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
                 }
@@ -3158,51 +3276,22 @@
                 });
             });
 
-            // Wire Set Baseline buttons
-            tbody.querySelectorAll('.set-baseline-btn').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    const resultId = btn.dataset.resultId;
-                    btn.disabled = true;
-                    btn.textContent = '…';
-                    try {
-                        const resp = await fetch(`/api/regression/baseline/${resultId}`, { method: 'POST' });
-                        const data = await resp.json();
-                        if (data.ok) {
-                            // Reload baselines then re-render the table so cells update immediately
-                            await _loadBaselines();
-                            if (_currentRunData) renderRegressionResults(_currentRunData);
-                        } else {
-                            btn.textContent = 'Failed';
-                            btn.disabled = false;
-                        }
-                    } catch {
-                        btn.textContent = 'Error';
-                        btn.disabled = false;
-                    }
-                });
-            });
-
             // Wire diff score click → comparison viewer
             tbody.querySelectorAll('.diff-score-link').forEach(el => {
                 el.addEventListener('click', () => {
-                    const siteId = el.dataset.siteId;
                     const pageUrl = decodeURIComponent(el.dataset.pageUrl || '');
+                    const prevPath = decodeURIComponent(el.dataset.prev || '');
                     const diffPath = decodeURIComponent(el.dataset.diff || '');
                     const currentPath = decodeURIComponent(el.dataset.current || '');
                     const score = el.dataset.score;
-
-                    // Look up baseline screenshot from cache
-                    const siteBaselines = _baselinesBySite[String(siteId)] || {};
-                    const baseline = siteBaselines[pageUrl];
-                    const baselinePath = baseline ? baseline.screenshot_path : null;
 
                     document.getElementById('diffTitle').textContent =
                         `Visual Diff — ${el.dataset.site}`;
                     document.getElementById('diffSubtitle').textContent =
                         `${pageUrl || ''}  •  ${parseFloat(score).toFixed(2)}% pixels changed`;
 
-                    document.getElementById('diffBaselineImg').src = baselinePath
-                        ? `/api/regression/screenshot/${encodeURIComponent(baselinePath)}`
+                    document.getElementById('diffBaselineImg').src = prevPath
+                        ? `/api/regression/screenshot/${prevPath}`
                         : '';
                     document.getElementById('diffDiffImg').src = diffPath
                         ? `/api/regression/screenshot/${diffPath}`
@@ -3220,17 +3309,6 @@
             if (!str) return fallback;
             if (Array.isArray(str)) return str;
             try { return JSON.parse(str); } catch { return fallback; }
-        }
-
-        // ── Visual diff baseline state ────────────────────────────────────────────
-        let _baselinesBySite = {};   // {site_id: {page_url: baseline_dict, _threshold: float}}
-
-        async function _loadBaselines() {
-            try {
-                const resp = await fetch('/api/regression/baselines');
-                const data = await resp.json();
-                _baselinesBySite = data || {};
-            } catch { /* non-fatal */ }
         }
 
         // Close diff overlay

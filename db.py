@@ -141,6 +141,7 @@ def init_db():
         "ALTER TABLE regression_results ADD COLUMN diff_score REAL",
         "ALTER TABLE regression_results ADD COLUMN diff_screenshot_path TEXT",
         "ALTER TABLE site_config ADD COLUMN diff_threshold REAL DEFAULT 1.0",
+        "ALTER TABLE regression_results ADD COLUMN prev_screenshot_path TEXT",
     ]:
         try:
             conn.execute(migration)
@@ -358,15 +359,16 @@ def save_regression_result(run_id: int, result: dict):
         "INSERT INTO regression_results "
         "(run_id, site_id, site_name, site_url, page_url, http_status, load_time_ms, "
         " js_errors, broken_resources, screenshot_path, has_issues, error, "
-        " diff_score, diff_screenshot_path) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " diff_score, diff_screenshot_path, prev_screenshot_path) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (run_id, result["site_id"], result["site_name"], result["site_url"],
          result.get("page_url"),
          result["http_status"], result["load_time_ms"],
          result["js_errors"], result["broken_resources"],
          result["screenshot_path"], result["has_issues"],
          result.get("error"),
-         result.get("diff_score"), result.get("diff_screenshot_path"))
+         result.get("diff_score"), result.get("diff_screenshot_path"),
+         result.get("prev_screenshot_path"))
     )
     # Update the run's checked count
     conn.execute(
@@ -553,3 +555,34 @@ def get_regression_result_by_id(result_id: int) -> dict | None:
         "SELECT * FROM regression_results WHERE id = ?", (result_id,)
     ).fetchone()
     return dict(row) if row else None
+
+
+def get_previous_screenshot(site_id, page_url: str, current_run_id: int) -> str | None:
+    """Return screenshot_path from the most recent prior result for (site_id, page_url).
+
+    NOTE: baseline_screenshots table is no longer written by active code — it can be
+    dropped in a future migration once the transition window has passed.
+    """
+    conn = _get_conn()
+    row = conn.execute("""
+        SELECT screenshot_path FROM regression_results
+        WHERE site_id = ?
+          AND COALESCE(page_url, '') = COALESCE(?, '')
+          AND run_id < ?
+          AND screenshot_path IS NOT NULL
+        ORDER BY id DESC LIMIT 1
+    """, (site_id, page_url, current_run_id)).fetchone()
+    return row["screenshot_path"] if row else None
+
+
+def get_results_for_site(site_id) -> list:
+    """Return all regression results for a site, newest first."""
+    conn = _get_conn()
+    rows = conn.execute("""
+        SELECT rr.*, runs.started_at AS run_started_at
+        FROM regression_results rr
+        LEFT JOIN regression_runs runs ON rr.run_id = runs.id
+        WHERE rr.site_id = ?
+        ORDER BY rr.id DESC
+    """, (site_id,)).fetchall()
+    return [dict(r) for r in rows]

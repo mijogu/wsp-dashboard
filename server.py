@@ -97,8 +97,9 @@ class DashboardHandler(
         elif path.startswith("/api/regression/screenshot/"):
             filename = path.split("/")[-1]
             self._serve_screenshot(filename)
-        elif path == "/api/regression/baselines":
-            self._get_regression_baselines()
+        elif path.startswith("/api/regression/site/") and path.endswith("/history"):
+            site_id = path.split("/")[-2]
+            self._regression_site_history(site_id)
         elif path == "/api/sites":
             self._get_sites_with_configs()
         elif path.startswith("/api/sites/config/"):
@@ -128,9 +129,6 @@ class DashboardHandler(
             self._start_regression_run(body)
         elif path == "/api/regression/cancel":
             self._cancel_regression_run()
-        elif path.startswith("/api/regression/baseline/"):
-            result_id = path.split("/")[-1]
-            self._set_regression_baseline(result_id)
         elif path.startswith("/api/sites/config/"):
             site_id = path.split("/")[-1]
             self._save_site_config(site_id, body)

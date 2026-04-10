@@ -17,6 +17,8 @@ import threading
 import time
 from datetime import datetime
 
+from db import get_previous_screenshot
+
 try:
     from playwright.sync_api import sync_playwright
     PLAYWRIGHT_AVAILABLE = True
@@ -230,8 +232,7 @@ def _get_pages_for_site(site_url: str, site_id, site_configs: dict) -> list:
 
 
 def run_checks(sites: list, add_log_fn, save_result_fn, finish_run_fn,
-               run_id: int, timeout_ms: int = 30000, site_configs: dict = None,
-               baselines: dict = None):
+               run_id: int, timeout_ms: int = 30000, site_configs: dict = None):
     """
     Run regression checks on all sites. Intended to be called in a background thread.
 
@@ -374,30 +375,21 @@ def run_checks(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                     if has_issues:
                         issues_found += 1
 
-                    # Visual diff against baseline (if one exists for this site/page)
+                    # Visual diff against previous run's screenshot for this (site_id, page_url)
                     diff_score = None
                     diff_screenshot_path = None
-                    if (result["screenshot_path"] and baselines
-                            and _screenshot_dir):
-                        site_baselines = baselines.get(str(site_id), {})
-                        # Normalise URL for lookup: try exact match, then strip/add
-                        # trailing slash so https://example.com and
-                        # https://example.com/ are treated as the same page.
-                        page_url_norm = page_url.rstrip("/")
-                        baseline = (site_baselines.get(page_url)
-                                    or site_baselines.get(page_url_norm)
-                                    or site_baselines.get(page_url_norm + "/"))
-                        if baseline and baseline.get("screenshot_path"):
-                            baseline_file = os.path.join(
-                                _screenshot_dir, baseline["screenshot_path"]
-                            )
+                    prev_screenshot_path = None
+                    if result["screenshot_path"] and _screenshot_dir:
+                        prev_path = get_previous_screenshot(site_id, page_url, run_id)
+                        if prev_path:
+                            prev_file = os.path.join(_screenshot_dir, prev_path)
                             current_file = os.path.join(
                                 _screenshot_dir, result["screenshot_path"]
                             )
-                            if not os.path.exists(baseline_file):
+                            if not os.path.exists(prev_file):
                                 add_log_fn("Regression", "warn",
-                                           f"  Baseline screenshot missing for "
-                                           f"{page_url}: {baseline['screenshot_path']}")
+                                           f"  Previous screenshot missing for "
+                                           f"{page_url}: {prev_path}")
                             elif not PILLOW_AVAILABLE:
                                 add_log_fn("Regression", "warn",
                                            "  Pillow not installed — visual diff disabled. "
@@ -405,21 +397,17 @@ def run_checks(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                             else:
                                 diff_filename = f"diff_{result['screenshot_path']}"
                                 diff_file = os.path.join(_screenshot_dir, diff_filename)
-                                score = compute_pixel_diff(baseline_file, current_file, diff_file)
+                                score = compute_pixel_diff(prev_file, current_file, diff_file)
                                 if score is not None:
                                     diff_score = score
                                     diff_screenshot_path = diff_filename
+                                    prev_screenshot_path = prev_path
                                     add_log_fn("Regression", "info",
                                                f"  Visual diff {page_url}: "
                                                f"{score:.2f}% changed")
                                 else:
                                     add_log_fn("Regression", "warn",
                                                f"  Visual diff failed for {page_url}")
-                        elif site_baselines:
-                            # Baselines exist for this site but not this exact page URL
-                            add_log_fn("Regression", "warn",
-                                       f"  No baseline for {page_url} — "
-                                       f"existing keys: {list(site_baselines.keys())}")
 
                     # Build the full record
                     full_result = {
@@ -437,6 +425,7 @@ def run_checks(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                         "error": result["error"],
                         "diff_score": diff_score,
                         "diff_screenshot_path": diff_screenshot_path,
+                        "prev_screenshot_path": prev_screenshot_path,
                     }
 
                     save_result_fn(run_id, full_result)

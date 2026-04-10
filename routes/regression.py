@@ -10,8 +10,8 @@ from db import (
     get_regression_results, get_latest_regression_run,
     delete_regression_run, get_regression_result_by_id,
     get_all_site_configs,
-    get_baseline, set_baseline, get_all_baselines,
     get_latest_result_per_site,
+    get_results_for_site,
 )
 from regression import (
     is_available as regression_available,
@@ -34,34 +34,14 @@ class RegressionMixin:
             r["diff_threshold"] = cfg.get("diff_threshold", 1.0)
         self._json_response(results)
 
-    def _get_regression_baselines(self):
-        """Return all current baselines as {site_id: {page_url: baseline}}."""
-        self._json_response(get_all_baselines())
-
-    def _set_regression_baseline(self, result_id_str):
-        """Promote a result's screenshot to be the baseline for its (site_id, page_url)."""
+    def _regression_site_history(self, site_id_str):
+        """Return all regression results for a site, newest first."""
         try:
-            result_id = int(result_id_str)
+            site_id = int(site_id_str)
         except ValueError:
-            self._json_response({"error": "Invalid result_id"}, 400)
+            self._json_response({"error": "Invalid site_id"}, 400)
             return
-        row = get_regression_result_by_id(result_id)
-        if not row:
-            self._json_response({"error": "Result not found"}, 404)
-            return
-        if not row.get("screenshot_path"):
-            self._json_response({"error": "No screenshot for this result"}, 400)
-            return
-        page_url = row.get("page_url") or row.get("site_url", "")
-        set_baseline(
-            site_id=row["site_id"],
-            page_url=page_url,
-            screenshot_path=row["screenshot_path"],
-            run_id=row["run_id"],
-        )
-        add_log("Regression", "ok",
-                f"Baseline set for site {row.get('site_name', row['site_id'])} — {page_url}")
-        self._json_response({"ok": True, "site_id": row["site_id"], "page_url": page_url})
+        self._json_response(get_results_for_site(site_id))
 
     def _regression_status(self):
         """Return whether Playwright is available and if a run is in progress."""
@@ -241,9 +221,8 @@ class RegressionMixin:
                     {"error": "None of the selected sites were found"}, 400)
                 return
 
-        # Load per-site configs and current baselines for the run
+        # Load per-site configs for the run
         site_configs = get_all_site_configs()
-        baselines = get_all_baselines()
 
         # Create a DB run record
         run_id = create_regression_run()
@@ -253,7 +232,7 @@ class RegressionMixin:
             target=run_regression_checks,
             args=(sites, add_log, save_regression_result,
                   finish_regression_run, run_id),
-            kwargs={"site_configs": site_configs, "baselines": baselines},
+            kwargs={"site_configs": site_configs},
             daemon=True,
         )
         t.start()
