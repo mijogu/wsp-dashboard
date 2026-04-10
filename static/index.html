@@ -3071,14 +3071,19 @@
                 const runs = await resp.json();
                 if (!runs.length) { sel.style.display = 'none'; return; }
                 sel.style.display = '';
+                const currentVal = sel.value; // preserve selection before rebuild
                 sel.innerHTML = runs.map((r, i) => {
                     const d = new Date(r.started_at);
                     const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                                + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
                                + ` — ${r.total_sites} sites, ${r.issues_found} issues`
                                + (r.status === 'failed' ? ' (failed)' : '');
-                    return `<option value="${r.id}"${i === 0 ? ' selected' : ''}>${label}</option>`;
+                    return `<option value="${r.id}">${label}</option>`;
                 }).join('');
+                // Restore previous selection if it still exists in the list, else default to first
+                if (currentVal && sel.querySelector(`option[value="${currentVal}"]`)) {
+                    sel.value = currentVal;
+                }
             } catch (e) { /* ignore */ }
         }
 
