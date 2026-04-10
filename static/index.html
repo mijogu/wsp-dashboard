@@ -835,8 +835,9 @@
                             <th>HTTP</th>
                             <th>Load Time</th>
                             <th>JS Errors</th>
-                            <th>Diff</th>
+                            <th>Broken Resources</th>
                             <th style="width:80px;">Screenshot</th>
+                            <th style="width:90px;">Diff</th>
                         </tr></thead>
                         <tbody id="siteHistoryBody"></tbody>
                     </table>
@@ -2688,9 +2689,10 @@
                 _sortTh('HTTP', 'http', _regSiteSort) +
                 _sortTh('Load Time', 'load', _regSiteSort) +
                 _sortTh('JS Errors', 'js', _regSiteSort) +
-                _sortTh('Diff', 'diff', _regSiteSort) +
+                _sortTh('Broken Resources', 'broken', _regSiteSort) +
                 _sortTh('Last Checked', 'checked', _regSiteSort) +
-                `<th style="width:80px;">Screenshot</th>`;
+                `<th style="width:80px;">Screenshot</th>` +
+                _sortTh('Diff', 'diff', _regSiteSort, 'width:90px;');
 
             thead.querySelectorAll('[data-sort-col]').forEach(th => {
                 th.addEventListener('click', () => {
@@ -2732,20 +2734,37 @@
                     : 'var(--text)';
 
                 const jsErrs = safeJsonParse(r.js_errors, []);
+                const broken = safeJsonParse(r.broken_resources, []);
+
                 const jsErrCell = jsErrs.length
                     ? `<span class="reg-detail-toggle" data-target="site-js-${idx}"
                           style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
                           >${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
                     : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
 
+                const brokenCell = broken.length
+                    ? `<span class="reg-detail-toggle" data-target="site-br-${idx}"
+                          style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
+                          >${broken.length} broken</span>`
+                    : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
+
                 let diffCell;
                 if (r.diff_score !== null && r.diff_score !== undefined) {
                     const score = parseFloat(r.diff_score);
-                    const threshold = r.diff_threshold || 1.0;
+                    const threshold = r.diff_threshold ?? 1.0;
                     const diffColor = score === 0 ? 'var(--green)'
                         : score < threshold ? 'var(--yellow)'
                         : 'var(--red)';
-                    diffCell = `<span style="color:${diffColor}; font-weight:600; font-size:12px;">${score === 0 ? '0%' : score.toFixed(2) + '%'}</span>`;
+                    const hasCompare = r.diff_screenshot_path && r.prev_screenshot_path;
+                    diffCell = `<span class="${hasCompare ? 'diff-score-link' : ''}"
+                        style="color:${diffColor}; font-size:12px; font-weight:600; ${hasCompare ? 'cursor:pointer; text-decoration:underline;' : ''}"
+                        data-prev="${r.prev_screenshot_path ? encodeURIComponent(r.prev_screenshot_path) : ''}"
+                        data-diff="${r.diff_screenshot_path ? encodeURIComponent(r.diff_screenshot_path) : ''}"
+                        data-current="${r.screenshot_path ? encodeURIComponent(r.screenshot_path) : ''}"
+                        data-site="${escapeHtml(r.site_name)}"
+                        data-score="${score}"
+                        data-page-url="${encodeURIComponent(r.page_url || r.site_url || '')}"
+                        >${score === 0 ? '0% — no change' : score.toFixed(2) + '%'}</span>`;
                 } else {
                     diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
                 }
@@ -2766,9 +2785,17 @@
 
                 const jsDetailRow = jsErrs.length ? `
                     <tr id="site-js-${idx}" style="display:none; background:var(--surface-2);">
-                        <td></td><td colspan="7" style="padding:6px 12px;">
+                        <td></td><td colspan="8" style="padding:6px 12px;">
                             <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">JS ERRORS</div>
                             ${jsErrs.map(e => `<div style="font-family:monospace; font-size:11px; color:var(--red); margin-bottom:2px;">${escapeHtml(String(e))}</div>`).join('')}
+                        </td>
+                    </tr>` : '';
+
+                const brokenDetailRow = broken.length ? `
+                    <tr id="site-br-${idx}" style="display:none; background:var(--surface-2);">
+                        <td></td><td colspan="8" style="padding:6px 12px;">
+                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">BROKEN RESOURCES</div>
+                            ${broken.map(b => `<div style="font-family:monospace; font-size:11px; margin-bottom:2px;"><span style="color:var(--red); font-weight:500;">${b.status}</span> <span style="color:var(--text-muted);">${escapeHtml(b.url)}</span></div>`).join('')}
                         </td>
                     </tr>` : '';
 
@@ -2785,16 +2812,18 @@
                     <td style="color:${httpColor}; font-weight:500;">${r.http_status || '—'}</td>
                     <td style="color:${loadColor};">${loadStr}</td>
                     <td>${jsErrCell}</td>
-                    <td style="text-align:center;">${diffCell}</td>
+                    <td>${brokenCell}</td>
                     <td style="font-size:12px; color:var(--text-muted);">${lastChecked}</td>
                     <td style="text-align:center;">${screenshotHtml}</td>
-                </tr>${jsDetailRow}`;
+                    <td style="text-align:center;">${diffCell}</td>
+                </tr>${jsDetailRow}${brokenDetailRow}`;
             }).join('');
 
             // Wire interactive elements
             tbody.querySelectorAll('.screenshot-link').forEach(link => {
                 link.addEventListener('click', e => {
                     e.preventDefault();
+                    e.stopPropagation();
                     document.getElementById('screenshotImg').src = link.dataset.src;
                     document.getElementById('screenshotTitle').textContent = link.dataset.site;
                     document.getElementById('screenshotOverlay').style.display = 'flex';
@@ -2805,14 +2834,36 @@
                 el.addEventListener('click', e => {
                     e.stopPropagation();
                     const target = document.getElementById(el.dataset.target);
-                    if (target) target.style.display = target.style.display === 'none' ? '' : 'none';
+                    if (target) {
+                        const visible = target.style.display !== 'none';
+                        target.style.display = visible ? 'none' : '';
+                        el.style.fontWeight = visible ? 'normal' : '700';
+                    }
+                });
+            });
+
+            tbody.querySelectorAll('.diff-score-link').forEach(el => {
+                el.addEventListener('click', e => {
+                    e.stopPropagation();
+                    const pageUrl = decodeURIComponent(el.dataset.pageUrl || '');
+                    const prevPath = decodeURIComponent(el.dataset.prev || '');
+                    const diffPath = decodeURIComponent(el.dataset.diff || '');
+                    const currentPath = decodeURIComponent(el.dataset.current || '');
+                    const score = el.dataset.score;
+                    document.getElementById('diffTitle').textContent = `Visual Diff — ${el.dataset.site}`;
+                    document.getElementById('diffSubtitle').textContent =
+                        `${pageUrl || ''}  •  ${parseFloat(score).toFixed(2)}% pixels changed`;
+                    document.getElementById('diffBaselineImg').src = prevPath ? `/api/regression/screenshot/${prevPath}` : '';
+                    document.getElementById('diffDiffImg').src = diffPath ? `/api/regression/screenshot/${diffPath}` : '';
+                    document.getElementById('diffCurrentImg').src = currentPath ? `/api/regression/screenshot/${currentPath}` : '';
+                    document.getElementById('diffOverlay').style.display = 'flex';
                 });
             });
 
             // Row click → history (skip if an interactive element was clicked)
             tbody.querySelectorAll('tr[data-site-id]').forEach(row => {
                 row.addEventListener('click', e => {
-                    if (e.target.closest('a, button, .reg-detail-toggle')) return;
+                    if (e.target.closest('a, button, .reg-detail-toggle, .diff-score-link')) return;
                     openSiteRegHistory(row.dataset.siteId, row.dataset.siteName, row.dataset.siteUrl);
                 });
             });
@@ -2841,7 +2892,7 @@
         async function loadSiteRegHistory(siteId) {
             const tbody = document.getElementById('siteHistoryBody');
             const empty = document.getElementById('siteHistoryEmpty');
-            tbody.innerHTML = `<tr><td colspan="7" style="color:var(--text-muted); padding:20px; text-align:center;">Loading…</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="color:var(--text-muted); padding:20px; text-align:center;">Loading…</td></tr>`;
             empty.style.display = 'none';
             try {
                 const resp = await fetch(`/api/regression/site/${siteId}/history`);
@@ -2852,44 +2903,95 @@
                     empty.style.display = '';
                     return;
                 }
-                tbody.innerHTML = results.map(r => {
+                tbody.innerHTML = results.map((r, idx) => {
                     const icon = r.has_issues ? '⚠️' : '✅';
+                    const hasHttpError = r.http_status && r.http_status >= 400;
+                    const jsErrs = safeJsonParse(r.js_errors, []);
+                    const broken = safeJsonParse(r.broken_resources, []);
+                    const rowBg = hasHttpError ? 'background:var(--red-bg);'
+                        : r.has_issues ? 'background:var(--yellow-bg);' : '';
+
                     const httpColor = !r.http_status ? 'var(--text-muted)'
                         : r.http_status < 300 ? 'var(--green)'
                         : r.http_status < 400 ? 'var(--yellow)'
                         : 'var(--red)';
+
                     const lt = r.load_time_ms;
                     const loadStr = lt ? `${(lt / 1000).toFixed(1)}s` : '—';
-                    const jsErrs = safeJsonParse(r.js_errors, []);
+                    const loadColor = !lt ? 'var(--text-muted)'
+                        : lt > 10000 ? 'var(--red)'
+                        : lt > 5000 ? 'var(--yellow)'
+                        : 'var(--text)';
+
                     const jsCell = jsErrs.length
-                        ? `<span style="color:var(--red); font-size:12px;">${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
+                        ? `<span class="reg-detail-toggle" data-target="hist-js-${idx}"
+                              style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
+                              >${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
                         : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
+
+                    const brokenCell = broken.length
+                        ? `<span class="reg-detail-toggle" data-target="hist-br-${idx}"
+                              style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
+                              >${broken.length} broken</span>`
+                        : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
+
+                    const screenshotHtml = r.screenshot_path
+                        ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name || '')}" style="color:var(--accent); font-size:12px;">View</a>`
+                        : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+
                     let diffCell;
                     if (r.diff_score !== null && r.diff_score !== undefined) {
                         const score = parseFloat(r.diff_score);
                         const threshold = r.diff_threshold ?? 1.0;
                         const diffColor = score === 0 ? 'var(--green)'
                             : score < threshold ? 'var(--yellow)' : 'var(--red)';
-                        diffCell = `<span style="color:${diffColor}; font-size:12px; font-weight:600;">${score === 0 ? '0%' : score.toFixed(2) + '%'}</span>`;
+                        const hasCompare = r.diff_screenshot_path && r.prev_screenshot_path;
+                        diffCell = `<span class="${hasCompare ? 'diff-score-link' : ''}"
+                            style="color:${diffColor}; font-size:12px; font-weight:600; ${hasCompare ? 'cursor:pointer; text-decoration:underline;' : ''}"
+                            data-prev="${r.prev_screenshot_path ? encodeURIComponent(r.prev_screenshot_path) : ''}"
+                            data-diff="${r.diff_screenshot_path ? encodeURIComponent(r.diff_screenshot_path) : ''}"
+                            data-current="${r.screenshot_path ? encodeURIComponent(r.screenshot_path) : ''}"
+                            data-site="${escapeHtml(r.site_name || '')}"
+                            data-score="${score}"
+                            data-page-url="${encodeURIComponent(r.page_url || r.site_url || '')}"
+                            >${score === 0 ? '0% — no change' : score.toFixed(2) + '%'}</span>`;
                     } else {
                         diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
                     }
-                    const screenshotHtml = r.screenshot_path
-                        ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name || '')}" style="color:var(--accent); font-size:12px;">View</a>`
-                        : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+
                     const ts = r.run_started_at || r.checked_at;
                     const dateStr = ts ? new Date(ts).toLocaleDateString('en-US',
                         { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
-                    return `<tr>
+
+                    const jsDetailRow = jsErrs.length ? `
+                        <tr id="hist-js-${idx}" style="display:none; background:var(--surface-2);">
+                            <td></td><td colspan="7" style="padding:6px 12px;">
+                                <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">JS ERRORS</div>
+                                ${jsErrs.map(e => `<div style="font-family:monospace; font-size:11px; color:var(--red); margin-bottom:2px;">${escapeHtml(String(e))}</div>`).join('')}
+                            </td>
+                        </tr>` : '';
+
+                    const brokenDetailRow = broken.length ? `
+                        <tr id="hist-br-${idx}" style="display:none; background:var(--surface-2);">
+                            <td></td><td colspan="7" style="padding:6px 12px;">
+                                <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">BROKEN RESOURCES</div>
+                                ${broken.map(b => `<div style="font-family:monospace; font-size:11px; margin-bottom:2px;"><span style="color:var(--red); font-weight:500;">${b.status}</span> <span style="color:var(--text-muted);">${escapeHtml(b.url)}</span></div>`).join('')}
+                            </td>
+                        </tr>` : '';
+
+                    return `<tr style="${rowBg}">
                         <td style="text-align:center;">${icon}</td>
                         <td style="font-size:12px; color:var(--text-muted);">${dateStr}</td>
                         <td style="color:${httpColor}; font-weight:500;">${r.http_status || '—'}</td>
-                        <td>${loadStr}</td>
+                        <td style="color:${loadColor};">${loadStr}</td>
                         <td>${jsCell}</td>
-                        <td style="text-align:center;">${diffCell}</td>
+                        <td>${brokenCell}</td>
                         <td style="text-align:center;">${screenshotHtml}</td>
-                    </tr>`;
+                        <td style="text-align:center;">${diffCell}</td>
+                    </tr>${jsDetailRow}${brokenDetailRow}`;
                 }).join('');
+
+                // Wire interactive elements
                 tbody.querySelectorAll('.screenshot-link').forEach(link => {
                     link.addEventListener('click', e => {
                         e.preventDefault();
@@ -2898,8 +3000,37 @@
                         document.getElementById('screenshotOverlay').style.display = 'flex';
                     });
                 });
+
+                tbody.querySelectorAll('.reg-detail-toggle').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const target = document.getElementById(el.dataset.target);
+                        if (target) {
+                            const visible = target.style.display !== 'none';
+                            target.style.display = visible ? 'none' : '';
+                            el.style.fontWeight = visible ? 'normal' : '700';
+                        }
+                    });
+                });
+
+                tbody.querySelectorAll('.diff-score-link').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const pageUrl = decodeURIComponent(el.dataset.pageUrl || '');
+                        const prevPath = decodeURIComponent(el.dataset.prev || '');
+                        const diffPath = decodeURIComponent(el.dataset.diff || '');
+                        const currentPath = decodeURIComponent(el.dataset.current || '');
+                        const score = el.dataset.score;
+                        document.getElementById('diffTitle').textContent = `Visual Diff — ${el.dataset.site}`;
+                        document.getElementById('diffSubtitle').textContent =
+                            `${pageUrl || ''}  •  ${parseFloat(score).toFixed(2)}% pixels changed`;
+                        document.getElementById('diffBaselineImg').src = prevPath ? `/api/regression/screenshot/${prevPath}` : '';
+                        document.getElementById('diffDiffImg').src = diffPath ? `/api/regression/screenshot/${diffPath}` : '';
+                        document.getElementById('diffCurrentImg').src = currentPath ? `/api/regression/screenshot/${currentPath}` : '';
+                        document.getElementById('diffOverlay').style.display = 'flex';
+                    });
+                });
+
             } catch (e) {
-                tbody.innerHTML = `<tr><td colspan="7" style="color:var(--red); padding:12px;">Error: ${e.message}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8" style="color:var(--red); padding:12px;">Error: ${e.message}</td></tr>`;
             }
         }
 
