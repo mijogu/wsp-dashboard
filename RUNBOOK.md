@@ -435,6 +435,27 @@ Navigate to the **Regression** tab in the dashboard and click **Run Site Check**
 - If Playwright is not installed, the tab shows install instructions and the Run button is disabled
 - Screenshots are viewport-sized (1280×720), not full-page
 - Configurable test pages per site via per-site config (see below); defaults to site homepage
+- A 2-second pause is added between page checks to avoid triggering WAF rate-limiting
+
+### User Agent
+
+Regression checks use a custom user agent that identifies the service rather than impersonating a browser:
+
+```
+WSP-Dashboard/1.0 Regression-Monitor (+mike@darngood.io)
+```
+
+This is intentionally transparent — it makes requests easier for hosting providers to allowlist and avoids being flagged as a bot.
+
+### SiteGround WAF Troubleshooting
+
+If regression checks start returning 403s or `sg-captcha` challenges for SiteGround-hosted sites, the Ubuntu machine's IP has likely been flagged. Resolution steps:
+
+1. Open a SiteGround support chat and report that your monitoring service (`WSP-Dashboard/1.0 Regression-Monitor`) is being blocked
+2. Ask them to allowlist either the user agent string or the IP address
+3. SiteGround has previously confirmed that Chrome/131 and similar old/generic user agents trigger their WAF — the custom user agent above avoids this
+
+To find the current Ubuntu public IP: `curl https://ifconfig.me`
 
 ---
 
