@@ -8,11 +8,28 @@ Then open: http://localhost:9111
 
 import json
 import os
+import subprocess
 import sys
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
+
+
+def _git_commit_hash() -> str:
+    """Return the short git commit hash, or 'unknown' if unavailable."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+COMMIT_HASH = _git_commit_hash()
 
 import routes
 from routes import add_log, get_settings, set_settings
@@ -54,6 +71,7 @@ class DashboardHandler(
                 "unlocked": routes.get_passphrase() is not None,
                 "hasConfig": config_exists(),
                 "hasSession": session_exists(),
+                "commit": COMMIT_HASH,
             })
         elif path == "/api/uptime-robot":
             self._proxy_uptime_robot()

@@ -527,7 +527,10 @@
     <!-- Header -->
     <div class="header">
         <div class="header-left">
-            <h1>WP Maintenance Dashboard</h1>
+            <div>
+                <h1>WP Maintenance Dashboard</h1>
+                <div id="buildHash" style="font-size:10px; color:var(--text-muted); letter-spacing:0.03em; margin-top:1px;"></div>
+            </div>
         </div>
         <div class="header-right">
             <button class="btn header-nav-btn" id="sitesBtn">Sites</button>
@@ -1229,6 +1232,9 @@
             try {
                 const status = await getStatus();
                 appState.hasConfig = status.hasConfig;
+                if (status.commit) {
+                    document.getElementById('buildHash').textContent = status.commit;
+                }
 
                 if (status.unlocked) {
                     // Server auto-unlocked from saved session
