@@ -134,6 +134,40 @@ def init_db():
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        -- Link checker tables
+        CREATE TABLE IF NOT EXISTS link_check_runs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at          TEXT NOT NULL,
+            finished_at         TEXT,
+            status              TEXT DEFAULT 'running',
+            total_sites         INTEGER DEFAULT 0,
+            total_pages_crawled INTEGER DEFAULT 0,
+            total_links_checked INTEGER DEFAULT 0,
+            total_broken        INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS link_check_results (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id        INTEGER NOT NULL,
+            site_id       INTEGER,
+            site_name     TEXT,
+            site_url      TEXT,
+            source_page   TEXT,
+            link_url      TEXT,
+            status_code   INTEGER,
+            redirect_url  TEXT,
+            is_broken     INTEGER DEFAULT 0,
+            is_external   INTEGER DEFAULT 0,
+            error         TEXT,
+            checked_at    TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (run_id) REFERENCES link_check_runs(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_lc_results_run
+            ON link_check_results(run_id);
+        CREATE INDEX IF NOT EXISTS idx_lc_results_site
+            ON link_check_results(run_id, site_id);
+
         -- Visual regression baselines: one screenshot per (site_id, page_url)
         CREATE TABLE IF NOT EXISTS baseline_screenshots (
             site_id         TEXT NOT NULL,
@@ -653,3 +687,94 @@ def get_results_for_site(site_id) -> list:
         ORDER BY rr.id DESC
     """, (site_id,)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ─── Link Checker ────────────────────────────────────────────
+
+
+def create_link_check_run() -> int:
+    """Create a new link check run. Returns the run_id."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO link_check_runs (started_at) VALUES (?)",
+        (datetime.utcnow().isoformat(),)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def save_link_check_result(run_id: int, result: dict):
+    """Save a single link check result row (call for every broken link found)."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO link_check_results "
+        "(run_id, site_id, site_name, site_url, source_page, link_url, "
+        " status_code, redirect_url, is_broken, is_external, error) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            run_id,
+            result.get("site_id"),
+            result.get("site_name"),
+            result.get("site_url"),
+            result.get("source_page"),
+            result.get("link_url"),
+            result.get("status_code"),
+            result.get("redirect_url"),
+            1 if result.get("is_broken") else 0,
+            1 if result.get("is_external") else 0,
+            result.get("error"),
+        )
+    )
+    conn.commit()
+
+
+def finish_link_check_run(run_id: int, pages_crawled: int, links_checked: int,
+                          broken_count: int, status: str = "completed"):
+    """Mark a link check run as finished."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE link_check_runs SET finished_at=?, status=?, "
+        "total_pages_crawled=?, total_links_checked=?, total_broken=? "
+        "WHERE id=?",
+        (datetime.utcnow().isoformat(), status,
+         pages_crawled, links_checked, broken_count, run_id)
+    )
+    conn.commit()
+
+
+def get_link_check_runs() -> list:
+    """Return all link check runs, newest first."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM link_check_runs ORDER BY id DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_link_check_results(run_id: int) -> list:
+    """Return all broken link results for a run."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM link_check_results WHERE run_id = ? ORDER BY site_id, source_page, link_url",
+        (run_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_link_check_run() -> dict | None:
+    """Return the most recent completed link check run, or None."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM link_check_runs WHERE status='completed' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_link_check_run_totals(run_id: int, total_sites: int):
+    """Update the total_sites count once all sites are known."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE link_check_runs SET total_sites=? WHERE id=?",
+        (total_sites, run_id)
+    )
+    conn.commit()

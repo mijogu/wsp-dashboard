@@ -39,6 +39,7 @@ from routes.cloudflare import CloudflareMixin
 from routes.mainwp import MainWPMixin
 from routes.sites import SitesMixin
 from routes.regression import RegressionMixin
+from routes.linkcheck import LinkCheckMixin
 
 from config import (
     load_config, config_exists,
@@ -53,7 +54,7 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 class DashboardHandler(
     AuthMixin, UptimeMixin, CloudflareMixin,
-    MainWPMixin, SitesMixin, RegressionMixin,
+    MainWPMixin, SitesMixin, RegressionMixin, LinkCheckMixin,
     SimpleHTTPRequestHandler,
 ):
     """Serves static files and handles API proxy routes."""
@@ -125,6 +126,15 @@ class DashboardHandler(
         elif path.startswith("/api/sites/config/"):
             site_id = path.split("/")[-1]
             self._get_site_config(site_id)
+        elif path == "/api/linkcheck/status":
+            self._get_link_check_status()
+        elif path == "/api/linkcheck/runs":
+            self._get_link_check_runs()
+        elif path == "/api/linkcheck/latest":
+            self._get_latest_link_check()
+        elif path.startswith("/api/linkcheck/results/"):
+            run_id = path.split("/")[-1]
+            self._get_link_check_results(run_id)
         elif path == "/api/logs":
             with routes._logs_lock:
                 self._json_response(list(routes._logs))
@@ -149,6 +159,10 @@ class DashboardHandler(
             self._start_regression_run(body)
         elif path == "/api/regression/cancel":
             self._cancel_regression_run()
+        elif path == "/api/linkcheck/run":
+            self._start_link_check(body)
+        elif path == "/api/linkcheck/cancel":
+            self._cancel_link_check()
         elif path.startswith("/api/sites/config/"):
             site_id = path.split("/")[-1]
             self._save_site_config(site_id, body)

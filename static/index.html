@@ -521,6 +521,29 @@
         }
         .sites-config-table tr:last-child td { border-bottom: none; }
         .sites-config-table tr:hover td { background: var(--surface-2); }
+
+        /* Link Checker */
+        .lc-site-row { cursor: pointer; }
+        .lc-site-row:hover td { background: var(--surface-2); }
+        .lc-site-row td { transition: background 0.1s; }
+        .lc-expand { display: none; }
+        .lc-expand.open { display: table-row-group; }
+        .lc-broken-row td {
+            padding: 6px 14px 6px 40px;
+            font-size: 12px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface-2);
+        }
+        .lc-broken-row:last-child td { border-bottom: none; }
+        .lc-badge {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .lc-badge-internal { background: var(--accent-glow); color: var(--accent); }
+        .lc-badge-external { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
     </style>
 </head>
 <body>
@@ -552,6 +575,7 @@
             <button class="tab" data-tab="history">Update History</button>
             <button class="tab" data-tab="downtime">Downtime Log</button>
             <button class="tab" data-tab="regression">Regression</button>
+            <button class="tab" data-tab="linkchecker">Link Checker</button>
         </div>
 
         <!-- Overview Tab -->
@@ -912,6 +936,72 @@
                 </div>
             </div>
         </div>
+
+        <!-- Link Checker Tab -->
+        <div id="linkchecker" class="tab-content">
+            <!-- Toolbar -->
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+                <button class="btn btn-primary" id="lcRunBtn">&#x25B6; Run Link Check</button>
+                <button class="btn" id="lcCancelBtn" style="display:none; background:var(--red-bg); border-color:var(--red); color:var(--red);">✕ Cancel</button>
+                <span id="lcStatus" style="font-size:12px; color:var(--text-muted);"></span>
+                <div style="flex:1;"></div>
+                <select id="lcRunSelect" class="filter-input" style="min-width:200px; max-width:320px; font-size:12px; display:none;"></select>
+                <span id="lcRunInfo" style="font-size:12px; color:var(--text-muted);"></span>
+            </div>
+
+            <!-- Progress bar (shown during a run) -->
+            <div id="lcProgress" style="display:none; margin-bottom:14px;">
+                <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); margin-bottom:4px;">
+                    <span id="lcProgressLabel">Checking sites…</span>
+                    <span id="lcProgressCount"></span>
+                </div>
+                <div style="height:6px; background:var(--surface-2); border-radius:3px; overflow:hidden;">
+                    <div id="lcProgressBar" style="height:100%; background:var(--accent); width:0%; transition:width 0.3s; border-radius:3px;"></div>
+                </div>
+            </div>
+
+            <!-- Summary cards -->
+            <div id="lcSummary" style="display:none; margin-bottom:16px;">
+                <div class="stats-row" style="grid-template-columns: repeat(4, 1fr);">
+                    <div class="stat-card">
+                        <div class="stat-value" id="lcStatSites">—</div>
+                        <div class="stat-label">Sites</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="lcStatPages">—</div>
+                        <div class="stat-label">Pages Crawled</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="lcStatLinks">—</div>
+                        <div class="stat-label">Links Checked</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="lcStatBroken">—</div>
+                        <div class="stat-label">Broken Links</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results table -->
+            <div id="lcTableWrap" class="log-table-wrap">
+                <table class="log-table" id="lcTable">
+                    <thead>
+                        <tr>
+                            <th style="width:40px;">Status</th>
+                            <th>Site</th>
+                            <th style="text-align:right; width:80px;">Pages</th>
+                            <th style="text-align:right; width:80px;">Links</th>
+                            <th style="text-align:right; width:100px;">Broken</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lcBody"></tbody>
+                </table>
+                <div id="lcEmpty" class="empty-state">
+                    No link check runs yet. Click "Run Link Check" to start.
+                </div>
+            </div>
+        </div>
+
         <!-- Sites Tab -->
         <div id="sites" class="tab-content">
             <!-- List mode -->
@@ -1531,6 +1621,7 @@
             }
             if (tabName === 'sites' && !_sitesList.length) loadSitesTab();
             if (tabName === 'settings') loadSettingsData();
+            if (tabName === 'linkchecker') loadLinkChecker();
         }
 
         // ============================================================================
@@ -3979,6 +4070,327 @@
                 saveBtn.textContent = 'Save Changes';
             }
         });
+
+
+        // ============================================================================
+        // Link Checker
+        // ============================================================================
+        let _lcRuns = [];           // all runs (newest first)
+        let _lcSelectedRunId = null;
+        let _lcPollTimer = null;
+        let _lcExpandedSites = new Set(); // site_ids with expanded detail rows
+
+        // ── API helpers ──────────────────────────────────────────────────────────────
+        async function lcApiGet(path) {
+            const r = await fetch(path);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        }
+
+        async function lcApiPost(path, body = {}) {
+            const r = await fetch(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            return r.json();
+        }
+
+        // ── Entry point called when switching to the tab ──────────────────────────
+        async function loadLinkChecker() {
+            await refreshLcRuns();
+            const status = await lcApiGet('/api/linkcheck/status').catch(() => ({}));
+            if (status.active_run) {
+                updateLcProgress(status.active_run);
+                startLcPoll();
+            } else if (_lcRuns.length) {
+                const targetId = _lcSelectedRunId || _lcRuns[0].id;
+                await loadLcRun(targetId);
+            } else {
+                renderLcEmpty();
+            }
+            updateLcButtons(!!status.active_run);
+        }
+
+        async function refreshLcRuns() {
+            try {
+                _lcRuns = await lcApiGet('/api/linkcheck/runs');
+            } catch { _lcRuns = []; }
+            renderLcRunSelector();
+        }
+
+        async function loadLcRun(runId) {
+            _lcSelectedRunId = runId;
+            // Sync selector
+            const sel = document.getElementById('lcRunSelect');
+            if (sel.value !== String(runId)) sel.value = String(runId);
+
+            try {
+                const data = await lcApiGet(`/api/linkcheck/results/${runId}`);
+                renderLcResults(data);
+            } catch (e) {
+                document.getElementById('lcBody').innerHTML =
+                    `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">
+                        Failed to load results: ${escapeHtml(e.message)}
+                    </td></tr>`;
+            }
+        }
+
+        // ── Run selector ─────────────────────────────────────────────────────────
+        function renderLcRunSelector() {
+            const sel = document.getElementById('lcRunSelect');
+            const info = document.getElementById('lcRunInfo');
+            if (!_lcRuns.length) {
+                sel.style.display = 'none';
+                info.textContent = '';
+                return;
+            }
+            sel.style.display = '';
+            const prevVal = _lcSelectedRunId ? String(_lcSelectedRunId) : null;
+            sel.innerHTML = _lcRuns.map(r => {
+                const d = new Date((r.started_at || '') + 'Z');
+                const label = `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} — ${r.total_broken ?? 0} broken`;
+                const stat = r.status !== 'completed' ? ` (${r.status})` : '';
+                return `<option value="${r.id}">${label}${stat}</option>`;
+            }).join('');
+            if (prevVal && sel.querySelector(`option[value="${prevVal}"]`)) {
+                sel.value = prevVal;
+            }
+        }
+
+        document.getElementById('lcRunSelect').addEventListener('change', async () => {
+            const id = parseInt(document.getElementById('lcRunSelect').value, 10);
+            if (id) await loadLcRun(id);
+        });
+
+        // ── Render results ───────────────────────────────────────────────────────
+        function renderLcResults(run) {
+            const results = run.results || [];
+            const body = document.getElementById('lcBody');
+            const empty = document.getElementById('lcEmpty');
+            const summary = document.getElementById('lcSummary');
+
+            // Update summary cards
+            document.getElementById('lcStatSites').textContent = run.total_sites ?? '—';
+            document.getElementById('lcStatPages').textContent = (run.total_pages_crawled ?? 0).toLocaleString();
+            document.getElementById('lcStatLinks').textContent = (run.total_links_checked ?? 0).toLocaleString();
+            const brokenCount = run.total_broken ?? 0;
+            const brokenEl = document.getElementById('lcStatBroken');
+            brokenEl.textContent = brokenCount.toLocaleString();
+            brokenEl.style.color = brokenCount > 0 ? 'var(--red)' : 'var(--green)';
+            summary.style.display = '';
+
+            // Update run info label
+            if (run.finished_at) {
+                const d = new Date(run.finished_at + 'Z');
+                document.getElementById('lcRunInfo').textContent =
+                    `Finished ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+            }
+
+            if (!results.length && brokenCount === 0) {
+                body.innerHTML = '';
+                empty.textContent = 'No broken links found — all links checked out!';
+                empty.style.display = '';
+                // Show "no broken links" in a positive way if run has results
+                if ((run.total_links_checked ?? 0) > 0) {
+                    empty.style.display = '';
+                }
+                return;
+            }
+
+            empty.style.display = 'none';
+
+            // Group broken results by site
+            const bySite = {};
+            for (const r of results) {
+                const key = r.site_id ?? r.site_name;
+                if (!bySite[key]) {
+                    bySite[key] = {
+                        site_id: r.site_id,
+                        site_name: r.site_name,
+                        site_url: r.site_url,
+                        broken: [],
+                    };
+                }
+                bySite[key].broken.push(r);
+            }
+
+            // Also add sites with zero broken links by consulting the run's site count
+            // (we only have info for sites that had broken links — that's fine,
+            //  sites with 0 broken won't appear in results, which is expected)
+            let html = '';
+            for (const [key, site] of Object.entries(bySite)) {
+                const isExpanded = _lcExpandedSites.has(String(site.site_id));
+                const brokenN = site.broken.length;
+                const siteDomain = (site.site_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+                const statusIcon = brokenN > 0 ? `<span style="color:var(--red);" title="Has broken links">⚠</span>`
+                                               : `<span style="color:var(--green);" title="All links ok">✓</span>`;
+
+                html += `<tr class="lc-site-row" data-site-key="${escapeHtml(String(key))}">
+                    <td style="text-align:center;">${statusIcon}</td>
+                    <td>
+                        <div style="font-weight:500;">${escapeHtml(site.site_name || '—')}</div>
+                        <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(siteDomain)}</div>
+                    </td>
+                    <td style="text-align:right; color:var(--text-muted);">—</td>
+                    <td style="text-align:right; color:var(--text-muted);">—</td>
+                    <td style="text-align:right;">
+                        <span style="color:var(--red); font-weight:600;">${brokenN}</span>
+                        <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">
+                            ${isExpanded ? '▲' : '▼'}
+                        </span>
+                    </td>
+                </tr>`;
+
+                // Expandable broken-link rows
+                html += `<tbody class="lc-expand${isExpanded ? ' open' : ''}" data-site-key="${escapeHtml(String(key))}">`;
+                for (const link of site.broken) {
+                    const statusLabel = link.status_code
+                        ? `<span style="font-weight:600; color:var(--red);">${link.status_code}</span>`
+                        : `<span style="color:var(--text-muted);">${escapeHtml(link.error || 'Error')}</span>`;
+                    const badge = link.is_external
+                        ? `<span class="lc-badge lc-badge-external">External</span>`
+                        : `<span class="lc-badge lc-badge-internal">Internal</span>`;
+                    const srcShort = (link.source_page || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 60) || '/';
+                    const linkShort = (link.link_url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 70) || link.link_url;
+                    html += `<tr class="lc-broken-row">
+                        <td colspan="5">
+                            <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;">
+                                ${statusLabel}
+                                ${badge}
+                                <a href="${escapeHtml(link.link_url || '#')}" target="_blank" rel="noopener"
+                                   style="color:var(--accent); font-size:12px; word-break:break-all;"
+                                   title="${escapeHtml(link.link_url || '')}">
+                                   ${escapeHtml(linkShort)}
+                                </a>
+                            </div>
+                            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                                Found on: <a href="${escapeHtml(link.source_page || '#')}" target="_blank" rel="noopener"
+                                    style="color:var(--text-muted);">${escapeHtml(srcShort)}</a>
+                            </div>
+                        </td>
+                    </tr>`;
+                }
+                html += `</tbody>`;
+            }
+
+            body.innerHTML = html;
+
+            // Wire expand/collapse clicks
+            document.querySelectorAll('.lc-site-row').forEach(row => {
+                row.addEventListener('click', () => {
+                    const key = row.dataset.siteKey;
+                    const expandBody = document.querySelector(`.lc-expand[data-site-key="${key}"]`);
+                    const arrow = row.querySelector('td:last-child span:last-child');
+                    if (!expandBody) return;
+                    const isOpen = expandBody.classList.toggle('open');
+                    if (isOpen) {
+                        _lcExpandedSites.add(key);
+                    } else {
+                        _lcExpandedSites.delete(key);
+                    }
+                    if (arrow) arrow.textContent = isOpen ? ' ▲' : ' ▼';
+                });
+            });
+        }
+
+        function renderLcEmpty() {
+            document.getElementById('lcSummary').style.display = 'none';
+            document.getElementById('lcBody').innerHTML = '';
+            document.getElementById('lcEmpty').textContent = 'No link check runs yet. Click "Run Link Check" to start.';
+            document.getElementById('lcEmpty').style.display = '';
+        }
+
+        // ── Progress updates during a run ────────────────────────────────────────
+        function updateLcProgress(activeRun) {
+            const prog = document.getElementById('lcProgress');
+            const label = document.getElementById('lcProgressLabel');
+            const count = document.getElementById('lcProgressCount');
+            const bar = document.getElementById('lcProgressBar');
+
+            prog.style.display = '';
+            const cur = activeRun.checked_sites ?? 0;
+            const tot = activeRun.total_sites ?? 0;
+            const pct = tot > 0 ? Math.round((cur / tot) * 100) : 0;
+            bar.style.width = pct + '%';
+            label.textContent = activeRun.current_site
+                ? `Checking ${escapeHtml(activeRun.current_site)}…`
+                : 'Preparing…';
+            count.textContent = tot > 0 ? `${cur} / ${tot}` : '';
+
+            // Live stats update
+            document.getElementById('lcStatSites').textContent = tot || '—';
+            document.getElementById('lcStatLinks').textContent = (activeRun.total_links ?? 0).toLocaleString();
+            const bl = activeRun.broken_links ?? 0;
+            const blEl = document.getElementById('lcStatBroken');
+            blEl.textContent = bl;
+            blEl.style.color = bl > 0 ? 'var(--red)' : 'var(--green)';
+            document.getElementById('lcSummary').style.display = '';
+        }
+
+        function updateLcButtons(isRunning) {
+            document.getElementById('lcRunBtn').style.display = isRunning ? 'none' : '';
+            document.getElementById('lcCancelBtn').style.display = isRunning ? '' : 'none';
+            if (!isRunning) {
+                document.getElementById('lcProgress').style.display = 'none';
+                document.getElementById('lcStatus').textContent = '';
+            }
+        }
+
+        // ── Polling ──────────────────────────────────────────────────────────────
+        function startLcPoll() {
+            if (_lcPollTimer) return;
+            _lcPollTimer = setInterval(async () => {
+                try {
+                    const status = await lcApiGet('/api/linkcheck/status');
+                    if (status.active_run) {
+                        updateLcProgress(status.active_run);
+                    } else {
+                        // Run finished
+                        clearInterval(_lcPollTimer);
+                        _lcPollTimer = null;
+                        updateLcButtons(false);
+                        await refreshLcRuns();
+                        if (_lcRuns.length) await loadLcRun(_lcRuns[0].id);
+                    }
+                } catch {
+                    // Network hiccup — keep polling
+                }
+            }, 2000);
+        }
+
+        // ── Button handlers ──────────────────────────────────────────────────────
+        document.getElementById('lcRunBtn').addEventListener('click', async () => {
+            document.getElementById('lcRunBtn').disabled = true;
+            document.getElementById('lcStatus').textContent = 'Starting…';
+            try {
+                const result = await lcApiPost('/api/linkcheck/run');
+                if (result.error) {
+                    document.getElementById('lcStatus').textContent = `Error: ${result.error}`;
+                    document.getElementById('lcRunBtn').disabled = false;
+                    return;
+                }
+                document.getElementById('lcStatus').textContent = '';
+                document.getElementById('lcRunBtn').disabled = false;
+                updateLcButtons(true);
+                document.getElementById('lcSummary').style.display = '';
+                startLcPoll();
+            } catch (e) {
+                document.getElementById('lcStatus').textContent = `Error: ${e.message}`;
+                document.getElementById('lcRunBtn').disabled = false;
+            }
+        });
+
+        document.getElementById('lcCancelBtn').addEventListener('click', async () => {
+            document.getElementById('lcCancelBtn').disabled = true;
+            try {
+                await lcApiPost('/api/linkcheck/cancel');
+                document.getElementById('lcStatus').textContent = 'Cancelling…';
+            } catch {
+                document.getElementById('lcCancelBtn').disabled = false;
+            }
+        });
+
 
     </script>
 
