@@ -1012,7 +1012,9 @@
                         <thead><tr>
                             <th style="width:40px;">Status</th>
                             <th>Date</th>
-                            <th style="text-align:right; width:120px;">Broken Links</th>
+                            <th style="text-align:right; width:80px;">Links</th>
+                            <th style="text-align:right; width:80px;">Broken</th>
+                            <th style="text-align:right; width:80px;">Working</th>
                         </tr></thead>
                         <tbody id="lcSiteHistoryBody"></tbody>
                     </table>
@@ -4116,6 +4118,15 @@
         // ============================================================================
         // Link Checker
         // ============================================================================
+        // Data shape from API:
+        //   /api/linkcheck/results/<id>  → { id, started_at, …, sites: [{site_id, site_name,
+        //       site_url, pages_crawled, links_checked, broken_count, broken_links: […]}, …] }
+        //   /api/linkcheck/site-status   → [{site_id, site_name, site_url,
+        //       pages_crawled, links_checked, broken_count, run_id, run_started_at}, …]
+        //   /api/linkcheck/site/<id>/history → [{run_id, started_at, …,
+        //       pages_crawled, links_checked, broken_count}, …]
+        //   /api/linkcheck/results/<run_id>/site/<site_id> → [{…broken link rows…}]
+
         let _lcViewMode = 'sites';        // 'sites' | 'runs'
         let _lcRuns     = [];             // all runs (newest first)
         let _lcSelectedRunId = null;
@@ -4198,38 +4209,36 @@
             document.getElementById('lcThead').innerHTML = `<tr>
                 <th style="width:40px;">Status</th>
                 <th>Site</th>
-                <th style="width:140px;">Last Checked</th>
-                <th style="text-align:right; width:120px;">Broken Links</th>
+                <th style="width:130px;">Last Checked</th>
+                <th style="text-align:right; width:80px;">Links</th>
+                <th style="text-align:right; width:80px;">Broken</th>
+                <th style="text-align:right; width:80px;">Working</th>
             </tr>`;
 
             try {
-                const siteStatus = await lcGet('/api/linkcheck/site-status');
-                // siteStatus = array of {site_id, site_name, site_url, broken_count, run_id, run_started_at}
-                // Build lookup by site_id
-                const statusById = {};
-                for (const s of siteStatus) {
-                    statusById[String(s.site_id)] = s;
-                }
-                // Get latest run meta for summary cards
-                if (siteStatus.length) {
-                    const runs = await lcGet('/api/linkcheck/runs').catch(() => []);
-                    _lcRuns = runs;
-                    renderLcRunSelector();
-                    _lcLatestRunMeta = runs.find(r => r.status === 'completed') || null;
-                    if (_lcLatestRunMeta) updateLcSummaryCards(_lcLatestRunMeta);
-                }
+                const [siteStatus, runs] = await Promise.all([
+                    lcGet('/api/linkcheck/site-status'),
+                    lcGet('/api/linkcheck/runs').catch(() => []),
+                ]);
+                _lcRuns = runs;
+                renderLcRunSelector();
+                _lcLatestRunMeta = runs.find(r => r.status === 'completed') || null;
+                if (_lcLatestRunMeta) updateLcSummaryCards(_lcLatestRunMeta);
 
-                renderLcSiteStatusTable(siteStatus, statusById);
+                const statusById = {};
+                for (const s of siteStatus) statusById[String(s.site_id)] = s;
+                renderLcSiteStatusTable(statusById);
             } catch (e) {
                 renderLcTableError(`Error loading site status: ${e.message}`);
             }
         }
 
-        function renderLcSiteStatusTable(siteStatus, statusById) {
+        function renderLcSiteStatusTable(statusById) {
             const body = document.getElementById('lcBody');
             const empty = document.getElementById('lcEmpty');
 
-            if (!_lcSiteList.length && !siteStatus.length) {
+            const activeSites = _lcSiteList.filter(s => !s.is_removed);
+            if (!activeSites.length && !Object.keys(statusById).length) {
                 body.innerHTML = '';
                 empty.textContent = 'No link check runs yet. Click "Run Link Check" to start.';
                 empty.style.display = '';
@@ -4237,25 +4246,27 @@
             }
             empty.style.display = 'none';
 
-            // Merge site list with status data; show all active sites
-            const activeSites = _lcSiteList.filter(s => !s.is_removed);
             const rows = activeSites.map(site => {
                 const st = statusById[String(site.id)];
-                const brokenN = st ? st.broken_count : null;
-                const hasRun = brokenN !== null;
+                const hasRun  = !!st;
+                const total   = st ? (st.links_checked ?? 0) : null;
+                const broken  = st ? (st.broken_count  ?? 0) : null;
+                const working = (total !== null && broken !== null) ? (total - broken) : null;
 
-                const icon = !hasRun ? `<span style="color:var(--text-muted);" title="Not yet checked">—</span>`
-                    : brokenN > 0   ? `<span style="color:var(--red);">⚠</span>`
-                                    : `<span style="color:var(--green);">✓</span>`;
+                const icon = !hasRun      ? `<span style="color:var(--text-muted);">—</span>`
+                    : broken > 0          ? `<span style="color:var(--red);">⚠</span>`
+                                          : `<span style="color:var(--green);">✓</span>`;
 
-                const brokenCell = !hasRun
-                    ? `<span style="color:var(--text-muted);">—</span>`
-                    : brokenN > 0
-                        ? `<span style="color:var(--red); font-weight:600;">${brokenN}</span>`
-                        : `<span style="color:var(--green);">0</span>`;
+                const fmt = n => n === null ? `<span style="color:var(--text-muted);">—</span>`
+                                            : n.toLocaleString();
+                const brokenCell = broken === null ? fmt(null)
+                    : broken > 0 ? `<span style="color:var(--red); font-weight:600;">${broken.toLocaleString()}</span>`
+                                 : `<span style="color:var(--green);">0</span>`;
+                const workingCell = working === null ? fmt(null)
+                    : `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`;
 
                 let lastChecked = '—';
-                if (st && st.run_started_at) {
+                if (st?.run_started_at) {
                     const d = new Date(st.run_started_at + 'Z');
                     const ago = Date.now() - d.getTime();
                     if (ago < 3600000) lastChecked = `${Math.round(ago / 60000)}m ago`;
@@ -4264,7 +4275,7 @@
                 }
 
                 const domain = (site.url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
-                const rowBg = (brokenN ?? 0) > 0 ? 'background:var(--yellow-bg);' : '';
+                const rowBg  = (broken ?? 0) > 0 ? 'background:var(--yellow-bg);' : '';
 
                 return `<tr style="cursor:pointer; ${rowBg}"
                         data-site-id="${site.id}"
@@ -4276,20 +4287,17 @@
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(domain)}</div>
                     </td>
                     <td style="font-size:12px; color:var(--text-muted);">${lastChecked}</td>
-                    <td style="text-align:right;">${brokenCell}</td>
+                    <td style="text-align:right; font-size:13px;">${fmt(total)}</td>
+                    <td style="text-align:right; font-size:13px;">${brokenCell}</td>
+                    <td style="text-align:right; font-size:13px;">${workingCell}</td>
                 </tr>`;
             });
 
             body.innerHTML = rows.join('');
 
-            // Row click → per-site history
             body.querySelectorAll('tr[data-site-id]').forEach(row => {
                 row.addEventListener('click', () => {
-                    openLcSiteHistory(
-                        row.dataset.siteId,
-                        row.dataset.siteName,
-                        row.dataset.siteUrl,
-                    );
+                    openLcSiteHistory(row.dataset.siteId, row.dataset.siteName, row.dataset.siteUrl);
                 });
             });
         }
@@ -4319,7 +4327,8 @@
         async function loadLcSiteHistory(siteId) {
             const tbody = document.getElementById('lcSiteHistoryBody');
             const empty = document.getElementById('lcSiteHistoryEmpty');
-            tbody.innerHTML = `<tr><td colspan="3" style="color:var(--text-muted); padding:20px; text-align:center;">Loading…</td></tr>`;
+            const COLS  = 5; // status + date + links + broken + working
+            tbody.innerHTML = `<tr><td colspan="${COLS}" style="color:var(--text-muted); padding:20px; text-align:center;">Loading…</td></tr>`;
             empty.style.display = 'none';
             try {
                 const history = await lcGet(`/api/linkcheck/site/${siteId}/history`);
@@ -4328,33 +4337,78 @@
                     empty.style.display = '';
                     return;
                 }
-                tbody.innerHTML = history.map(r => {
+
+                let html = '';
+                history.forEach((r, idx) => {
                     const d = new Date((r.started_at || '') + 'Z');
                     const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                         + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-                    const broken = r.broken_count ?? 0;
+                    const total   = r.links_checked ?? 0;
+                    const broken  = r.broken_count  ?? 0;
+                    const working = total - broken;
+
                     const icon = broken > 0
                         ? `<span style="color:var(--red);">⚠</span>`
                         : `<span style="color:var(--green);">✓</span>`;
                     const brokenCell = broken > 0
                         ? `<span style="color:var(--red); font-weight:600;">${broken}</span>`
                         : `<span style="color:var(--green);">0</span>`;
-                    return `<tr style="cursor:pointer;" data-run-id="${r.run_id}">
+                    const workingCell = `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`;
+                    const rowBg = broken > 0 ? 'background:var(--yellow-bg);' : '';
+                    const expandId = `lc-hist-expand-${idx}`;
+
+                    html += `<tr class="lc-site-row" style="cursor:pointer; ${rowBg}"
+                            data-run-id="${r.run_id}" data-site-id="${siteId}" data-expand-id="${expandId}">
                         <td style="text-align:center;">${icon}</td>
                         <td style="font-size:13px;">${dateStr}</td>
+                        <td style="text-align:right;">${total.toLocaleString()}</td>
                         <td style="text-align:right;">${brokenCell}</td>
+                        <td style="text-align:right;">${workingCell}</td>
                     </tr>`;
-                }).join('');
-                // Clicking a run row → switch to Runs view and load that run
+
+                    if (broken > 0) {
+                        // Placeholder tbody for lazy-loaded broken links
+                        html += `<tbody id="${expandId}" class="lc-expand" data-loaded="false">
+                            <tr class="lc-broken-row">
+                                <td colspan="${COLS}" style="text-align:center; color:var(--text-muted); font-size:12px; padding:10px;">
+                                    Click to expand broken links
+                                </td>
+                            </tr>
+                        </tbody>`;
+                    }
+                });
+
+                tbody.innerHTML = html;
+
                 tbody.querySelectorAll('tr[data-run-id]').forEach(row => {
-                    row.addEventListener('click', () => {
-                        closeLcSiteHistory();
-                        setLcView('runs');
-                        loadLcRunResults(row.dataset.runId);
+                    row.addEventListener('click', async () => {
+                        const runId    = row.dataset.runId;
+                        const thisSiteId = row.dataset.siteId;
+                        const expandId = row.dataset.expandId;
+                        if (!expandId) return;
+                        const expandEl = document.getElementById(expandId);
+                        if (!expandEl) return;
+
+                        const isOpen = expandEl.classList.toggle('open');
+                        if (!isOpen) return;
+
+                        // Lazy-load broken links the first time
+                        if (expandEl.dataset.loaded !== 'true') {
+                            expandEl.innerHTML = `<tr class="lc-broken-row"><td colspan="${COLS}"
+                                style="text-align:center; color:var(--text-muted); font-size:12px; padding:10px;">Loading…</td></tr>`;
+                            try {
+                                const links = await lcGet(`/api/linkcheck/results/${runId}/site/${thisSiteId}`);
+                                expandEl.innerHTML = lcBrokenLinksHtml(links, COLS);
+                                expandEl.dataset.loaded = 'true';
+                            } catch (e) {
+                                expandEl.innerHTML = `<tr class="lc-broken-row"><td colspan="${COLS}"
+                                    style="color:var(--red); padding:10px;">${escapeHtml(e.message)}</td></tr>`;
+                            }
+                        }
                     });
                 });
             } catch (e) {
-                tbody.innerHTML = `<tr><td colspan="3" style="color:var(--red); padding:16px; text-align:center;">
+                tbody.innerHTML = `<tr><td colspan="${COLS}" style="color:var(--red); padding:16px; text-align:center;">
                     Error: ${escapeHtml(e.message)}</td></tr>`;
             }
         }
@@ -4410,16 +4464,55 @@
             }
         }
 
-        function renderLcRunsView(run) {
-            const results = run.results || [];
-            const body = document.getElementById('lcBody');
-            const empty = document.getElementById('lcEmpty');
+        // ── Shared helper: render a list of broken link rows ─────────────────────
+        function lcBrokenLinksHtml(links, colspan) {
+            if (!links.length) {
+                return `<tr class="lc-broken-row">
+                    <td colspan="${colspan}" style="text-align:center; color:var(--green); font-size:12px; padding:10px;">
+                        ✓ No broken links
+                    </td>
+                </tr>`;
+            }
+            return links.map(link => {
+                const statusLabel = link.status_code
+                    ? `<span style="font-weight:600; color:var(--red);">${link.status_code}</span>`
+                    : `<span style="color:var(--text-muted);">${escapeHtml(link.error || 'Error')}</span>`;
+                const badge = link.is_external
+                    ? `<span class="lc-badge lc-badge-external">External</span>`
+                    : `<span class="lc-badge lc-badge-internal">Internal</span>`;
+                const srcShort  = (link.source_page || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 60) || '/';
+                const linkShort = (link.link_url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 80) || link.link_url;
+                return `<tr class="lc-broken-row">
+                    <td colspan="${colspan}">
+                        <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;">
+                            ${statusLabel}
+                            ${badge}
+                            <a href="${escapeHtml(link.link_url || '#')}" target="_blank" rel="noopener"
+                               style="color:var(--accent); font-size:12px; word-break:break-all;"
+                               title="${escapeHtml(link.link_url || '')}">${escapeHtml(linkShort)}</a>
+                        </div>
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                            Found on:
+                            <a href="${escapeHtml(link.source_page || '#')}" target="_blank" rel="noopener"
+                               style="color:var(--text-muted);">${escapeHtml(srcShort)}</a>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
 
-            // Header
+        function renderLcRunsView(run) {
+            const sites = run.sites || [];
+            const body  = document.getElementById('lcBody');
+            const empty = document.getElementById('lcEmpty');
+            const COLS  = 5; // status + site + links + broken + working
+
             document.getElementById('lcThead').innerHTML = `<tr>
                 <th style="width:40px;">Status</th>
                 <th>Site</th>
-                <th style="text-align:right; width:100px;">Broken</th>
+                <th style="text-align:right; width:80px;">Links</th>
+                <th style="text-align:right; width:80px;">Broken</th>
+                <th style="text-align:right; width:80px;">Working</th>
             </tr>`;
 
             updateLcSummaryCards(run);
@@ -4430,80 +4523,63 @@
                     `Finished ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
             }
 
-            if (!results.length) {
+            if (!sites.length) {
                 body.innerHTML = '';
-                empty.textContent = (run.total_links_checked ?? 0) > 0
-                    ? 'No broken links found — all links checked out!'
-                    : 'No results for this run.';
+                empty.textContent = 'No results for this run.';
                 empty.style.display = '';
                 return;
             }
             empty.style.display = 'none';
 
-            // Group by site
-            const bySite = {};
-            for (const r of results) {
-                const key = String(r.site_id ?? r.site_name);
-                if (!bySite[key]) bySite[key] = { site_id: r.site_id, site_name: r.site_name, site_url: r.site_url, broken: [] };
-                bySite[key].broken.push(r);
-            }
-
             let html = '';
-            for (const [key, site] of Object.entries(bySite)) {
-                const brokenN = site.broken.length;
+            sites.forEach((site, idx) => {
+                const total   = site.links_checked ?? 0;
+                const broken  = site.broken_count  ?? 0;
+                const working = total - broken;
+                const hasBroken = broken > 0;
+                const key = String(site.site_id ?? site.site_name ?? idx);
                 const isExpanded = _lcExpandedSites.has(key);
                 const domain = (site.site_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
-                html += `<tr class="lc-site-row" style="cursor:pointer; background:var(--yellow-bg);" data-site-key="${escapeHtml(key)}">
-                    <td style="text-align:center;"><span style="color:var(--red);">⚠</span></td>
+                const rowBg = hasBroken ? 'background:var(--yellow-bg);' : '';
+                const icon  = hasBroken ? `<span style="color:var(--red);">⚠</span>`
+                                        : `<span style="color:var(--green);">✓</span>`;
+                const brokenCell  = hasBroken
+                    ? `<span style="color:var(--red); font-weight:600;">${broken}</span>`
+                    : `<span style="color:var(--green);">0</span>`;
+                const workingCell = `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`;
+                const expandArrow = hasBroken
+                    ? `<span style="font-size:11px; color:var(--text-muted); margin-left:4px;">${isExpanded ? '▲' : '▼'}</span>`
+                    : '';
+
+                html += `<tr class="lc-site-row" style="cursor:${hasBroken ? 'pointer' : 'default'}; ${rowBg}"
+                        data-site-key="${escapeHtml(key)}">
+                    <td style="text-align:center;">${icon}</td>
                     <td>
                         <div style="font-weight:500;">${escapeHtml(site.site_name || '—')}</div>
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(domain)}</div>
                     </td>
-                    <td style="text-align:right;">
-                        <span style="color:var(--red); font-weight:600;">${brokenN}</span>
-                        <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">${isExpanded ? '▲' : '▼'}</span>
-                    </td>
+                    <td style="text-align:right; font-size:13px;">${total.toLocaleString()}</td>
+                    <td style="text-align:right; font-size:13px;">${brokenCell}${expandArrow}</td>
+                    <td style="text-align:right; font-size:13px;">${workingCell}</td>
                 </tr>`;
 
-                html += `<tbody class="lc-expand${isExpanded ? ' open' : ''}" data-site-key="${escapeHtml(key)}">`;
-                for (const link of site.broken) {
-                    const statusLabel = link.status_code
-                        ? `<span style="font-weight:600; color:var(--red);">${link.status_code}</span>`
-                        : `<span style="color:var(--text-muted);">${escapeHtml(link.error || 'Error')}</span>`;
-                    const badge = link.is_external
-                        ? `<span class="lc-badge lc-badge-external">External</span>`
-                        : `<span class="lc-badge lc-badge-internal">Internal</span>`;
-                    const srcShort = (link.source_page || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 60) || '/';
-                    const linkShort = (link.link_url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 80) || link.link_url;
-                    html += `<tr class="lc-broken-row">
-                        <td colspan="3">
-                            <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;">
-                                ${statusLabel}
-                                ${badge}
-                                <a href="${escapeHtml(link.link_url || '#')}" target="_blank" rel="noopener"
-                                   style="color:var(--accent); font-size:12px; word-break:break-all;"
-                                   title="${escapeHtml(link.link_url || '')}">${escapeHtml(linkShort)}</a>
-                            </div>
-                            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                                Found on:
-                                <a href="${escapeHtml(link.source_page || '#')}" target="_blank" rel="noopener"
-                                   style="color:var(--text-muted);">${escapeHtml(srcShort)}</a>
-                            </div>
-                        </td>
-                    </tr>`;
+                if (hasBroken) {
+                    // broken_links are pre-loaded from the API response
+                    const preloaded = site.broken_links || [];
+                    html += `<tbody class="lc-expand${isExpanded ? ' open' : ''}" data-site-key="${escapeHtml(key)}" data-loaded="true">
+                        ${lcBrokenLinksHtml(preloaded, COLS)}
+                    </tbody>`;
                 }
-                html += `</tbody>`;
-            }
+            });
 
             body.innerHTML = html;
 
-            // Expand/collapse on site-row click
             body.querySelectorAll('.lc-site-row').forEach(row => {
                 row.addEventListener('click', () => {
                     const key = row.dataset.siteKey;
                     const expandEl = document.querySelector(`.lc-expand[data-site-key="${CSS.escape(key)}"]`);
-                    const arrow = row.querySelector('td:last-child span:last-child');
                     if (!expandEl) return;
+                    const arrow = row.querySelector('td:nth-child(4) span:last-child');
                     const isOpen = expandEl.classList.toggle('open');
                     if (isOpen) _lcExpandedSites.add(key); else _lcExpandedSites.delete(key);
                     if (arrow) arrow.textContent = isOpen ? ' ▲' : ' ▼';

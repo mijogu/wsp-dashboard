@@ -133,6 +133,11 @@ class DashboardHandler(
         elif path.startswith("/api/linkcheck/site/") and path.endswith("/history"):
             site_id = path.split("/")[-2]
             self._get_link_check_site_history(site_id)
+        elif path.startswith("/api/linkcheck/results/") and "/site/" in path:
+            # /api/linkcheck/results/<run_id>/site/<site_id>
+            parts = path.split("/")
+            run_id, site_id = parts[-3], parts[-1]
+            self._get_link_check_run_site_results(run_id, site_id)
         elif path == "/api/linkcheck/runs":
             self._get_link_check_runs()
         elif path == "/api/linkcheck/latest":

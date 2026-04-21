@@ -168,6 +168,21 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_lc_results_site
             ON link_check_results(run_id, site_id);
 
+        -- Per-site summary row written after every site completes, even with 0 broken
+        CREATE TABLE IF NOT EXISTS link_check_site_runs (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id          INTEGER NOT NULL,
+            site_id         INTEGER,
+            site_name       TEXT,
+            site_url        TEXT,
+            pages_crawled   INTEGER DEFAULT 0,
+            links_checked   INTEGER DEFAULT 0,
+            broken_count    INTEGER DEFAULT 0,
+            FOREIGN KEY (run_id) REFERENCES link_check_runs(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_lcsr_run_id  ON link_check_site_runs(run_id);
+        CREATE INDEX IF NOT EXISTS idx_lcsr_site_id ON link_check_site_runs(site_id);
+
         -- Visual regression baselines: one screenshot per (site_id, page_url)
         CREATE TABLE IF NOT EXISTS baseline_screenshots (
             site_id         TEXT NOT NULL,
@@ -780,12 +795,26 @@ def update_link_check_run_totals(run_id: int, total_sites: int):
     conn.commit()
 
 
+def save_link_check_site_run(run_id: int, site_id, site_name: str,
+                              site_url: str, pages_crawled: int,
+                              links_checked: int, broken_count: int):
+    """Save a per-site summary row after each site finishes being checked."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO link_check_site_runs "
+        "(run_id, site_id, site_name, site_url, pages_crawled, links_checked, broken_count) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (run_id, site_id, site_name, site_url, pages_crawled, links_checked, broken_count)
+    )
+    conn.commit()
+
+
 def get_link_check_site_status() -> list:
     """
-    Return per-site broken-link count from the most recent completed run.
-    Each row: site_id, site_name, site_url, broken_count, run_id, run_started_at.
-    Sites with no broken links in the latest run will not appear here;
-    callers should merge with the site registry to show all sites.
+    Return per-site summary from the most recent completed run.
+    Uses link_check_site_runs so every checked site appears, even those
+    with 0 broken links. Each row includes pages_crawled, links_checked,
+    broken_count, run_id, run_started_at.
     """
     conn = _get_conn()
     latest = conn.execute(
@@ -794,12 +823,11 @@ def get_link_check_site_status() -> list:
     ).fetchone()
     if not latest:
         return []
-    run_id = latest["id"]
-    run_started_at = latest["started_at"]
+    run_id, run_started_at = latest["id"], latest["started_at"]
     rows = conn.execute(
-        "SELECT site_id, site_name, site_url, COUNT(*) as broken_count "
-        "FROM link_check_results WHERE run_id=? "
-        "GROUP BY site_id, site_name, site_url "
+        "SELECT site_id, site_name, site_url, "
+        "       pages_crawled, links_checked, broken_count "
+        "FROM link_check_site_runs WHERE run_id=? "
         "ORDER BY broken_count DESC, site_name",
         (run_id,)
     ).fetchall()
@@ -812,22 +840,56 @@ def get_link_check_site_status() -> list:
 
 def get_link_check_site_history(site_id: int) -> list:
     """
-    Return per-run summary for a specific site.
-    Each row: run_id, started_at, finished_at, status, broken_count.
-    Includes all completed runs, even those with 0 broken links for this site.
+    Return per-run summary for one site, newest first.
+    Uses link_check_site_runs so every run that checked this site appears,
+    including runs where the site had 0 broken links.
     """
     conn = _get_conn()
     rows = conn.execute(
         """
-        SELECT r.id as run_id, r.started_at, r.finished_at, r.status,
-               COUNT(res.id) as broken_count
-        FROM link_check_runs r
-        LEFT JOIN link_check_results res
-               ON res.run_id = r.id AND res.site_id = ?
-        WHERE r.status = 'completed'
-        GROUP BY r.id
-        ORDER BY r.id DESC
+        SELECT sr.run_id, r.started_at, r.finished_at, r.status,
+               sr.pages_crawled, sr.links_checked, sr.broken_count
+        FROM link_check_site_runs sr
+        JOIN link_check_runs r ON r.id = sr.run_id
+        WHERE sr.site_id = ? AND r.status = 'completed'
+        ORDER BY sr.run_id DESC
         """,
         (site_id,)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_link_check_run_site_results(run_id: int, site_id: int) -> list:
+    """Return all broken link results for one site within one run."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM link_check_results "
+        "WHERE run_id=? AND site_id=? "
+        "ORDER BY source_page, link_url",
+        (run_id, site_id)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_link_check_results_for_run(run_id: int) -> list:
+    """
+    Return per-site summary + broken results for one run.
+    Returns list of site dicts, each with 'broken_links' list attached.
+    """
+    conn = _get_conn()
+    sites = conn.execute(
+        "SELECT * FROM link_check_site_runs WHERE run_id=? "
+        "ORDER BY broken_count DESC, site_name",
+        (run_id,)
+    ).fetchall()
+    result = []
+    for s in sites:
+        sd = dict(s)
+        broken = conn.execute(
+            "SELECT * FROM link_check_results "
+            "WHERE run_id=? AND site_id=? ORDER BY source_page, link_url",
+            (run_id, sd["site_id"])
+        ).fetchall()
+        sd["broken_links"] = [dict(b) for b in broken]
+        result.append(sd)
+    return result

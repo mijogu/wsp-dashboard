@@ -308,17 +308,21 @@ def _get_pages_for_site(site_url: str, site_id, site_configs: dict | None,
 # ── Main entry point ──────────────────────────────────────────
 
 def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
-                   run_id: int, site_configs: dict | None = None):
+                   run_id: int, site_configs: dict | None = None,
+                   save_site_run_fn=None):
     """
     Run link checks on all sites. Call in a background thread.
 
     Args:
-        sites:          list of dicts with 'id', 'name', 'url'
-        add_log_fn:     function(source, level, message)
-        save_result_fn: function(run_id, result_dict)
-        finish_run_fn:  function(run_id, pages, links, broken, status)
-        run_id:         DB run ID
-        site_configs:   dict keyed by str(site_id) with per-site settings
+        sites:             list of dicts with 'id', 'name', 'url'
+        add_log_fn:        function(source, level, message)
+        save_result_fn:    function(run_id, result_dict)  — only broken links
+        finish_run_fn:     function(run_id, pages, links, broken, status)
+        run_id:            DB run ID
+        site_configs:      dict keyed by str(site_id) with per-site settings
+        save_site_run_fn:  function(run_id, site_id, site_name, site_url,
+                                    pages_crawled, links_checked, broken_count)
+                           Called once per site; records summary even if 0 broken.
     """
     global _active_check, _cancel_requested
     _cancel_requested = False
@@ -469,6 +473,16 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                             "is_external": is_ext,
                             "error": check.get("error"),
                         })
+
+            # Write per-site summary row (always, even with 0 broken)
+            if save_site_run_fn:
+                try:
+                    save_site_run_fn(
+                        run_id, site_id, site_name, site_url,
+                        len(pages_to_crawl), len(to_check), site_broken,
+                    )
+                except Exception:
+                    pass
 
             _active_check["total_pages"] = total_pages_crawled
             _active_check["checked_sites"] = site_idx + 1
