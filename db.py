@@ -2,6 +2,7 @@
 WP Maintenance Dashboard — SQLite persistence layer.
 
 Stores:
+  - sites: permanent site registry — never deleted, marked when removed from MainWP
   - update_history: individual plugin/theme/WP update records from Pro Reports
   - fetch_log: metadata about each fetch (when, how many records, date range)
   - sites_cache: snapshot of MainWP site info for fast dashboard startup
@@ -35,6 +36,16 @@ def init_db():
     """Create tables if they don't exist. Safe to call on every startup."""
     conn = _get_conn()
     conn.executescript("""
+        -- Permanent site registry: never deleted, survives MainWP removal
+        CREATE TABLE IF NOT EXISTS sites (
+            id                      INTEGER PRIMARY KEY,  -- MainWP site ID (stable)
+            name                    TEXT NOT NULL,
+            url                     TEXT,
+            added_at                TEXT NOT NULL DEFAULT (datetime('now')),
+            last_seen_at            TEXT,                 -- last successful MainWP sync
+            removed_from_mainwp_at  TEXT                  -- NULL = still active
+        );
+
         CREATE TABLE IF NOT EXISTS update_history (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             site_id         TEXT NOT NULL,
@@ -336,6 +347,62 @@ def get_cache_age() -> str | None:
         "SELECT MIN(updated_at) FROM sites_cache"
     ).fetchone()
     return row[0] if row else None
+
+
+# ─── Site Registry ───────────────────────────────────────────
+
+
+def upsert_sites(sites: list):
+    """Permanently register sites from a full MainWP sync.
+
+    - Inserts new sites, updates name/url/last_seen_at for existing ones.
+    - Clears removed_from_mainwp_at when a previously-removed site comes back.
+    - Marks any site not in this sync as removed (if not already marked).
+    Never deletes rows — historical data always has a named identity.
+    """
+    conn = _get_conn()
+    incoming_ids = set()
+
+    for site in sites:
+        site_id = site.get("id")
+        if not site_id:
+            continue
+        site_id = int(site_id)
+        incoming_ids.add(site_id)
+        conn.execute("""
+            INSERT INTO sites (id, name, url, added_at, last_seen_at, removed_from_mainwp_at)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'), NULL)
+            ON CONFLICT(id) DO UPDATE SET
+                name                   = excluded.name,
+                url                    = excluded.url,
+                last_seen_at           = excluded.last_seen_at,
+                removed_from_mainwp_at = NULL
+        """, (site_id, site.get("name", ""), site.get("url", "")))
+
+    # Mark any previously-active site that didn't appear in this sync
+    if incoming_ids:
+        placeholders = ",".join("?" * len(incoming_ids))
+        conn.execute(f"""
+            UPDATE sites
+            SET removed_from_mainwp_at = datetime('now')
+            WHERE id NOT IN ({placeholders})
+              AND removed_from_mainwp_at IS NULL
+        """, list(incoming_ids))
+
+    conn.commit()
+
+
+def get_registered_sites() -> list:
+    """Return all ever-seen sites, active first then removed, both alphabetical."""
+    conn = _get_conn()
+    rows = conn.execute("""
+        SELECT id, name, url, added_at, last_seen_at, removed_from_mainwp_at
+        FROM sites
+        ORDER BY
+            CASE WHEN removed_from_mainwp_at IS NULL THEN 0 ELSE 1 END,
+            name COLLATE NOCASE
+    """).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ─── Regression Testing ──────────────────────────────────────

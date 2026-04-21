@@ -102,6 +102,8 @@ class DashboardHandler(
             self._regression_site_history(site_id)
         elif path == "/api/sites":
             self._get_sites_with_configs()
+        elif path == "/api/sites/registry":
+            self._get_registered_sites()
         elif path.startswith("/api/sites/config/"):
             site_id = path.split("/")[-1]
             self._get_site_config(site_id)

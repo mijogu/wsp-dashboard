@@ -941,6 +941,11 @@
                         <div style="font-size:12px; color:var(--text-muted);" id="siteDetailUrl"></div>
                     </div>
                 </div>
+                <div id="siteRemovedBanner" style="display:none; background:var(--yellow-bg); border:1px solid var(--yellow); border-radius:6px; padding:10px 14px; margin-bottom:18px; font-size:13px; color:var(--text);">
+                    ⚠️ <strong>Removed from MainWP</strong> — this site no longer appears in MainWP syncs.
+                    Historical data and settings are preserved here.
+                    <span id="siteRemovedDate" style="color:var(--text-muted); margin-left:6px;"></span>
+                </div>
                 <div class="settings-grid">
                     <!-- General -->
                     <div class="settings-section">
@@ -2633,16 +2638,30 @@
             }
         }
 
+        let _siteRegistryMap = {};  // site_id (string) → registry entry
+
         async function loadSiteStatus() {
+            // Fetch registry in parallel so we can flag removed sites
+            const [statusResp, registryResp] = await Promise.allSettled([
+                fetch('/api/regression/site-status'),
+                fetch('/api/sites/registry'),
+            ]);
+
+            if (registryResp.status === 'fulfilled' && registryResp.value.ok) {
+                try {
+                    const reg = await registryResp.value.json();
+                    _siteRegistryMap = Object.fromEntries(reg.map(s => [String(s.id), s]));
+                } catch { /* ignore */ }
+            }
+
             try {
-                const resp = await fetch('/api/regression/site-status');
-                if (!resp.ok) {
+                if (!statusResp.value?.ok) {
                     document.getElementById('regressionBody').innerHTML = '';
                     document.getElementById('regressionEmpty').style.display = '';
                     document.getElementById('regressionSummary').style.display = 'none';
                     return;
                 }
-                const results = await resp.json();
+                const results = await statusResp.value.json();
                 renderSiteStatusTable(results);
             } catch (e) {
                 document.getElementById('regressionStatus').textContent = `Error: ${e.message}`;
@@ -2799,13 +2818,19 @@
                         </td>
                     </tr>` : '';
 
-                return `<tr style="${rowBg} cursor:pointer;"
+                const regEntry = _siteRegistryMap[String(r.site_id)];
+                const isRemoved = regEntry?.is_removed;
+                const removedBadge = isRemoved
+                    ? `<span style="display:inline-block; font-size:10px; font-weight:600; padding:1px 6px; border-radius:3px; background:var(--yellow-bg); color:var(--yellow); margin-left:6px; vertical-align:middle;">removed</span>`
+                    : '';
+
+                return `<tr style="${rowBg} cursor:pointer; ${isRemoved ? 'opacity:0.65;' : ''}"
                     data-site-id="${r.site_id}"
                     data-site-name="${escapeHtml(r.site_name || '')}"
                     data-site-url="${escapeHtml(r.page_url || r.site_url || '')}">
                     <td style="text-align:center;">${icon}</td>
                     <td>
-                        <div style="font-weight:500;">${escapeHtml(r.site_name || '—')} <span style="color:var(--text-muted); font-size:11px;">›</span></div>
+                        <div style="font-weight:500;">${escapeHtml(r.site_name || '—')} <span style="color:var(--text-muted); font-size:11px;">›</span>${removedBadge}</div>
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml((r.page_url || r.site_url || '').replace(/^https?:\/\//, ''))}</div>
                         ${r.error ? `<div style="font-size:11px; color:var(--red); margin-top:2px;">${escapeHtml(r.error)}</div>` : ''}
                     </td>
@@ -3787,7 +3812,10 @@
 
         function renderSitesTable() {
             const tbody = document.getElementById('sitesBody');
-            tbody.innerHTML = _sitesList.map(s => {
+            const active  = _sitesList.filter(s => !s.is_removed);
+            const removed = _sitesList.filter(s => s.is_removed);
+
+            const renderRow = s => {
                 let pages = [];
                 try { pages = JSON.parse(s.test_pages || '[]'); } catch {}
                 const pageCount = pages.length || 1;
@@ -3797,9 +3825,13 @@
                 const notesHtml = s.notes
                     ? `<span style="color:var(--text-muted); font-size:12px;" title="${escapeHtml(s.notes)}">${escapeHtml(s.notes.slice(0, 40))}${s.notes.length > 40 ? '…' : ''}</span>`
                     : `<span style="color:var(--text-muted);">—</span>`;
-                return `<tr style="cursor:pointer;" data-site-id="${s.id}">
+                const removedBadge = s.is_removed
+                    ? `<span style="display:inline-block; font-size:10px; font-weight:600; padding:1px 6px; border-radius:3px; background:var(--yellow-bg); color:var(--yellow); margin-left:6px; vertical-align:middle;">removed</span>`
+                    : '';
+                const rowOpacity = s.is_removed ? 'opacity:0.6;' : '';
+                return `<tr style="cursor:pointer; ${rowOpacity}" data-site-id="${s.id}">
                     <td>
-                        <div style="font-weight:500;">${escapeHtml(s.name)}</div>
+                        <div style="font-weight:500;">${escapeHtml(s.name)}${removedBadge}</div>
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml((s.url || '').replace(/^https?:\/\//, ''))}</div>
                     </td>
                     <td>${clientHtml}</td>
@@ -3811,7 +3843,16 @@
                         <button class="btn site-edit-btn" data-site-id="${s.id}" style="font-size:12px; padding:5px 10px;">Edit</button>
                     </td>
                 </tr>`;
-            }).join('');
+            };
+
+            let html = active.map(renderRow).join('');
+            if (removed.length) {
+                html += `<tr><td colspan="5" style="padding:12px 0 4px; font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; border-top:1px solid var(--border); pointer-events:none;">
+                    Removed from MainWP (${removed.length})
+                </td></tr>`;
+                html += removed.map(renderRow).join('');
+            }
+            tbody.innerHTML = html;
 
             tbody.querySelectorAll('tr[data-site-id]').forEach(row => {
                 row.addEventListener('click', (e) => {
@@ -3837,6 +3878,21 @@
             document.getElementById('siteConfigDiffThreshold').value =
                 site.diff_threshold != null ? site.diff_threshold : 1.0;
             document.getElementById('siteDetailStatus').style.display = 'none';
+
+            // Removed-from-MainWP banner
+            const banner = document.getElementById('siteRemovedBanner');
+            if (site.is_removed) {
+                const dateEl = document.getElementById('siteRemovedDate');
+                if (site.removed_from_mainwp_at) {
+                    const d = new Date(site.removed_from_mainwp_at + 'Z');
+                    dateEl.textContent = `(since ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})`;
+                } else {
+                    dateEl.textContent = '';
+                }
+                banner.style.display = '';
+            } else {
+                banner.style.display = 'none';
+            }
 
             let pages = [];
             try { pages = JSON.parse(site.test_pages || '[]'); } catch {}

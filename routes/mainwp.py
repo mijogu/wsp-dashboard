@@ -10,7 +10,7 @@ from routes import get_settings, add_log
 from db import (
     save_update_records, get_update_history,
     get_history_stats, get_last_fetch_date,
-    cache_sites,
+    cache_sites, upsert_sites,
 )
 
 
@@ -78,6 +78,11 @@ class MainWPMixin:
                 add_log("DB", "ok", f"Cached {len(sites_list)} sites")
             except Exception as e:
                 add_log("DB", "warn", f"Site cache failed: {e}")
+            try:
+                upsert_sites(sites_list)
+                add_log("DB", "ok", f"Registry updated: {len(sites_list)} sites")
+            except Exception as e:
+                add_log("DB", "warn", f"Site registry update failed: {e}")
 
             self._json_response(sites_list)
         except http_requests.exceptions.ConnectionError as e:
