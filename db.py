@@ -778,3 +778,56 @@ def update_link_check_run_totals(run_id: int, total_sites: int):
         (total_sites, run_id)
     )
     conn.commit()
+
+
+def get_link_check_site_status() -> list:
+    """
+    Return per-site broken-link count from the most recent completed run.
+    Each row: site_id, site_name, site_url, broken_count, run_id, run_started_at.
+    Sites with no broken links in the latest run will not appear here;
+    callers should merge with the site registry to show all sites.
+    """
+    conn = _get_conn()
+    latest = conn.execute(
+        "SELECT id, started_at FROM link_check_runs "
+        "WHERE status='completed' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not latest:
+        return []
+    run_id = latest["id"]
+    run_started_at = latest["started_at"]
+    rows = conn.execute(
+        "SELECT site_id, site_name, site_url, COUNT(*) as broken_count "
+        "FROM link_check_results WHERE run_id=? "
+        "GROUP BY site_id, site_name, site_url "
+        "ORDER BY broken_count DESC, site_name",
+        (run_id,)
+    ).fetchall()
+    result = [dict(r) for r in rows]
+    for r in result:
+        r["run_id"] = run_id
+        r["run_started_at"] = run_started_at
+    return result
+
+
+def get_link_check_site_history(site_id: int) -> list:
+    """
+    Return per-run summary for a specific site.
+    Each row: run_id, started_at, finished_at, status, broken_count.
+    Includes all completed runs, even those with 0 broken links for this site.
+    """
+    conn = _get_conn()
+    rows = conn.execute(
+        """
+        SELECT r.id as run_id, r.started_at, r.finished_at, r.status,
+               COUNT(res.id) as broken_count
+        FROM link_check_runs r
+        LEFT JOIN link_check_results res
+               ON res.run_id = r.id AND res.site_id = ?
+        WHERE r.status = 'completed'
+        GROUP BY r.id
+        ORDER BY r.id DESC
+        """,
+        (site_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]

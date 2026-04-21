@@ -13,6 +13,8 @@ from db import (
     get_link_check_results,
     get_latest_link_check_run,
     update_link_check_run_totals,
+    get_link_check_site_status,
+    get_link_check_site_history,
 )
 from link_checker import (
     run_link_check,
@@ -23,6 +25,19 @@ from link_checker import (
 
 class LinkCheckMixin:
     """Mixin for link checker endpoints."""
+
+    def _get_link_check_site_status(self):
+        """Return per-site broken-link count from the latest completed run."""
+        self._json_response(get_link_check_site_status())
+
+    def _get_link_check_site_history(self, site_id_str):
+        """Return all completed runs with broken-link count for one site."""
+        try:
+            site_id = int(site_id_str)
+        except ValueError:
+            self._json_response({"error": "Invalid site_id"}, 400)
+            return
+        self._json_response(get_link_check_site_history(site_id))
 
     def _get_link_check_status(self):
         """Return active run state, or last run info if nothing is running."""

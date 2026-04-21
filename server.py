@@ -128,6 +128,11 @@ class DashboardHandler(
             self._get_site_config(site_id)
         elif path == "/api/linkcheck/status":
             self._get_link_check_status()
+        elif path == "/api/linkcheck/site-status":
+            self._get_link_check_site_status()
+        elif path.startswith("/api/linkcheck/site/") and path.endswith("/history"):
+            site_id = path.split("/")[-2]
+            self._get_link_check_site_history(site_id)
         elif path == "/api/linkcheck/runs":
             self._get_link_check_runs()
         elif path == "/api/linkcheck/latest":
