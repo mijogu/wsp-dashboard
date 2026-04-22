@@ -109,7 +109,9 @@ class LinkCheckMixin:
 
         if body is None:
             body = self._read_body()
-        site_ids_filter = body.get("site_ids")  # list of IDs, or None = all
+        site_ids_filter  = body.get("site_ids")       # list of IDs, or None = all
+        check_internal   = body.get("check_internal", True)
+        check_external   = body.get("check_external", False)
 
         # Prefer permanent registry; fall back to live MainWP cache
         registered = get_registered_sites()
@@ -140,8 +142,10 @@ class LinkCheckMixin:
             args=(sites, add_log, save_link_check_result,
                   finish_link_check_run, run_id),
             kwargs={
-                "site_configs": site_configs,
+                "site_configs":    site_configs,
                 "save_site_run_fn": save_link_check_site_run,
+                "check_internal":  bool(check_internal),
+                "check_external":  bool(check_external),
             },
             daemon=True,
         )

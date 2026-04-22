@@ -49,6 +49,19 @@ _SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
 # Shared user-agent (matches regression.py)
 _USER_AGENT = "WSP-Dashboard/1.0 LinkChecker (+mgunn@blueblazeassociates.com)"
 
+# Image file extensions — links whose href ends with one of these are flagged
+_IMAGE_EXTENSIONS = frozenset([
+    "jpg", "jpeg", "png", "gif", "svg", "webp",
+    "ico", "bmp", "tiff", "tif", "avif", "apng",
+])
+
+
+def _is_image_url(url: str) -> bool:
+    """Return True if the URL's path ends in a recognised image extension."""
+    path = urlparse(url).path.lower()
+    ext = path.rsplit(".", 1)[-1] if "." in path else ""
+    return ext in _IMAGE_EXTENSIONS
+
 # ── Active run state ──────────────────────────────────────────
 
 _run_lock = threading.Lock()
@@ -277,9 +290,10 @@ def _fetch_page_links(page_url: str, site_url: str,
             continue
         is_ext = not _is_same_domain(link, site_url)
         result.append({
-            "link_url": link,
+            "link_url":   link,
             "source_page": page_url,
             "is_external": is_ext,
+            "is_image":    _is_image_url(link),
         })
     return result
 
@@ -309,7 +323,9 @@ def _get_pages_for_site(site_url: str, site_id, site_configs: dict | None,
 
 def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                    run_id: int, site_configs: dict | None = None,
-                   save_site_run_fn=None):
+                   save_site_run_fn=None,
+                   check_internal: bool = True,
+                   check_external: bool = False):
     """
     Run link checks on all sites. Call in a background thread.
 
@@ -321,8 +337,11 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
         run_id:            DB run ID
         site_configs:      dict keyed by str(site_id) with per-site settings
         save_site_run_fn:  function(run_id, site_id, site_name, site_url,
-                                    pages_crawled, links_checked, broken_count)
+                                    pages_crawled, links_checked, broken_count,
+                                    *, external_count, redirect_count, image_link_count)
                            Called once per site; records summary even if 0 broken.
+        check_internal:    check internal (same-domain) links (default True)
+        check_external:    check external (cross-domain) links (default False)
     """
     global _active_check, _cancel_requested
     _cancel_requested = False
@@ -402,45 +421,51 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
 
             total_pages_crawled += len(pages_to_crawl)
 
-            # Deduplicate: keep one entry per unique (link_url, source_page) pair.
-            # For the check we only need unique link_urls; track which source pages
-            # surfaced each link so we can store that info on failure.
-            seen_urls: dict[str, str] = {}   # link_url → first source_page
+            # Deduplicate: one entry per unique link_url (first occurrence wins).
+            # link_meta carries everything needed for checking and DB storage.
+            link_meta: dict[str, dict] = {}  # url → {source_page, is_external, is_image}
             for entry in all_links:
                 lu = entry["link_url"]
-                if lu not in seen_urls:
-                    seen_urls[lu] = entry["source_page"]
+                if lu not in link_meta:
+                    link_meta[lu] = {
+                        "source_page": entry["source_page"],
+                        "is_external": entry.get("is_external", False),
+                        "is_image":    entry.get("is_image",    False),
+                    }
 
-            # Separate internal vs external; skip external unless CHECK_EXTERNAL
-            internal_map: dict[str, str] = {}
-            external_map: dict[str, str] = {}
-            for entry in all_links:
-                lu = entry["link_url"]
-                if lu not in internal_map and lu not in external_map:
-                    if entry["is_external"]:
-                        external_map[lu] = entry["source_page"]
-                    else:
-                        internal_map[lu] = entry["source_page"]
+            # Aggregate stats that don't require HTTP checking
+            site_external_count = sum(1 for m in link_meta.values() if m["is_external"])
+            site_image_count    = sum(1 for m in link_meta.values() if m["is_image"])
 
-            to_check = dict(internal_map)
-            if CHECK_EXTERNAL:
-                to_check.update(external_map)
+            # Build the set to actually check based on caller-supplied scope flags
+            to_check: dict[str, dict] = {}
+            if check_internal:
+                to_check.update({u: m for u, m in link_meta.items()
+                                  if not m["is_external"]})
+            if check_external:
+                to_check.update({u: m for u, m in link_meta.items()
+                                  if m["is_external"]})
 
             add_log_fn("LinkChecker", "info",
-                       f"  {site_name}: {len(internal_map)} internal links, "
-                       f"{len(external_map)} external — checking {len(to_check)}")
+                       f"  {site_name}: {len(link_meta) - site_external_count} internal, "
+                       f"{site_external_count} external — checking {len(to_check)}")
 
             # Phase 3 — check links concurrently
-            site_broken = 0
+            site_broken    = 0
+            site_redirects = 0
             with ThreadPoolExecutor(max_workers=LINK_CHECK_WORKERS) as pool:
                 futures = {
-                    pool.submit(_check_link, url, session): (url, src)
-                    for url, src in to_check.items()
+                    pool.submit(_check_link, url, session): url
+                    for url in to_check
                 }
                 for fut in as_completed(futures):
                     if _cancel_requested:
                         break
-                    url, source_page = futures[fut]
+                    url  = futures[fut]
+                    meta = to_check[url]
+                    source_page = meta["source_page"]
+                    is_ext = meta["is_external"]
+                    is_img = meta["is_image"]
                     try:
                         check = fut.result()
                     except Exception as e:
@@ -455,23 +480,27 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                     total_links_checked += 1
                     _active_check["total_links"] = total_links_checked
 
+                    # Count redirects for ALL checked links (working or broken)
+                    if check.get("redirect_url"):
+                        site_redirects += 1
+
                     if check["is_broken"]:
                         site_broken += 1
                         total_broken += 1
                         _active_check["broken_links"] = total_broken
 
-                        is_ext = url in external_map
                         save_result_fn(run_id, {
-                            "site_id": site_id,
-                            "site_name": site_name,
-                            "site_url": site_url,
+                            "site_id":    site_id,
+                            "site_name":  site_name,
+                            "site_url":   site_url,
                             "source_page": source_page,
-                            "link_url": url,
+                            "link_url":   url,
                             "status_code": check["status_code"],
                             "redirect_url": check["redirect_url"],
-                            "is_broken": True,
+                            "is_broken":  True,
                             "is_external": is_ext,
-                            "error": check.get("error"),
+                            "is_image":   is_img,
+                            "error":      check.get("error"),
                         })
 
             # Write per-site summary row (always, even with 0 broken)
@@ -480,6 +509,9 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                     save_site_run_fn(
                         run_id, site_id, site_name, site_url,
                         len(pages_to_crawl), len(to_check), site_broken,
+                        external_count=site_external_count,
+                        redirect_count=site_redirects,
+                        image_link_count=site_image_count,
                     )
                 except Exception:
                     pass
@@ -490,8 +522,9 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
             add_log_fn("LinkChecker",
                        "warn" if site_broken else "ok",
                        f"  {'⚠️' if site_broken else '✓'} {site_name}: "
-                       f"{len(pages_to_crawl)} pages, {len(to_check)} links, "
-                       f"{site_broken} broken")
+                       f"{len(pages_to_crawl)} pages, {len(to_check)} checked "
+                       f"({site_external_count} ext · {site_image_count} img · "
+                       f"{site_redirects} redirect), {site_broken} broken")
 
             # Brief pause between sites
             time.sleep(1)

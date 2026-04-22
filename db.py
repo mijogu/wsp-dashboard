@@ -202,6 +202,11 @@ def init_db():
         "ALTER TABLE regression_results ADD COLUMN diff_screenshot_path TEXT",
         "ALTER TABLE site_config ADD COLUMN diff_threshold REAL DEFAULT 1.0",
         "ALTER TABLE regression_results ADD COLUMN prev_screenshot_path TEXT",
+        # Link checker v2 — stats columns
+        "ALTER TABLE link_check_site_runs ADD COLUMN external_count INTEGER DEFAULT 0",
+        "ALTER TABLE link_check_site_runs ADD COLUMN redirect_count INTEGER DEFAULT 0",
+        "ALTER TABLE link_check_site_runs ADD COLUMN image_link_count INTEGER DEFAULT 0",
+        "ALTER TABLE link_check_results ADD COLUMN is_image INTEGER DEFAULT 0",
     ]:
         try:
             conn.execute(migration)
@@ -724,8 +729,8 @@ def save_link_check_result(run_id: int, result: dict):
     conn.execute(
         "INSERT INTO link_check_results "
         "(run_id, site_id, site_name, site_url, source_page, link_url, "
-        " status_code, redirect_url, is_broken, is_external, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " status_code, redirect_url, is_broken, is_external, is_image, error) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             run_id,
             result.get("site_id"),
@@ -737,6 +742,7 @@ def save_link_check_result(run_id: int, result: dict):
             result.get("redirect_url"),
             1 if result.get("is_broken") else 0,
             1 if result.get("is_external") else 0,
+            1 if result.get("is_image")    else 0,
             result.get("error"),
         )
     )
@@ -797,14 +803,19 @@ def update_link_check_run_totals(run_id: int, total_sites: int):
 
 def save_link_check_site_run(run_id: int, site_id, site_name: str,
                               site_url: str, pages_crawled: int,
-                              links_checked: int, broken_count: int):
+                              links_checked: int, broken_count: int,
+                              *, external_count: int = 0,
+                              redirect_count: int = 0,
+                              image_link_count: int = 0):
     """Save a per-site summary row after each site finishes being checked."""
     conn = _get_conn()
     conn.execute(
         "INSERT INTO link_check_site_runs "
-        "(run_id, site_id, site_name, site_url, pages_crawled, links_checked, broken_count) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (run_id, site_id, site_name, site_url, pages_crawled, links_checked, broken_count)
+        "(run_id, site_id, site_name, site_url, pages_crawled, links_checked, "
+        " broken_count, external_count, redirect_count, image_link_count) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, site_id, site_name, site_url, pages_crawled, links_checked,
+         broken_count, external_count, redirect_count, image_link_count)
     )
     conn.commit()
 
@@ -822,6 +833,7 @@ def get_link_check_site_status() -> list:
         """
         SELECT sr.site_id, sr.site_name, sr.site_url,
                sr.pages_crawled, sr.links_checked, sr.broken_count,
+               sr.external_count, sr.redirect_count, sr.image_link_count,
                sr.run_id,
                r.started_at AS run_started_at,
                prev.links_checked AS prev_links_checked,
@@ -862,10 +874,12 @@ def get_link_check_site_history(site_id: int) -> list:
         """
         SELECT run_id, started_at, finished_at, status,
                pages_crawled, links_checked, broken_count,
+               external_count, redirect_count, image_link_count,
                prev_links_checked, prev_broken_count
         FROM (
             SELECT sr.run_id, r.started_at, r.finished_at, r.status,
                    sr.pages_crawled, sr.links_checked, sr.broken_count,
+                   sr.external_count, sr.redirect_count, sr.image_link_count,
                    LAG(sr.links_checked) OVER (ORDER BY sr.run_id ASC) AS prev_links_checked,
                    LAG(sr.broken_count)  OVER (ORDER BY sr.run_id ASC) AS prev_broken_count
             FROM link_check_site_runs sr
@@ -902,6 +916,7 @@ def get_link_check_results_for_run(run_id: int) -> list:
         """
         SELECT sr.id, sr.run_id, sr.site_id, sr.site_name, sr.site_url,
                sr.pages_crawled, sr.links_checked, sr.broken_count,
+               sr.external_count, sr.redirect_count, sr.image_link_count,
                prev.links_checked AS prev_links_checked,
                prev.broken_count  AS prev_broken_count
         FROM link_check_site_runs sr
