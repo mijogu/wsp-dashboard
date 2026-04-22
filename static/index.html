@@ -1054,7 +1054,11 @@
                         <span id="lcSiteSelectCount" style="font-size:12px; color:var(--text-muted);"></span>
                     </div>
                     <div id="lcSiteSelectList" style="max-height:340px; overflow-y:auto; padding:6px 0;"></div>
-                    <div style="padding:12px 18px; border-top:1px solid var(--border); text-align:right;">
+                    <div style="padding:10px 18px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn" id="lcRestoreDefaultBtn" style="font-size:12px; padding:5px 12px;">Restore Default</button>
+                            <button class="btn" id="lcSetDefaultBtn" style="font-size:12px; padding:5px 12px;" data-state="idle">Set Default</button>
+                        </div>
                         <button class="btn btn-primary" id="lcSiteSelectDoneBtn" style="font-size:13px; padding:6px 20px;">Done</button>
                     </div>
                 </div>
@@ -4164,6 +4168,9 @@
 
         const LC_STORAGE_KEY  = 'lc_selected_sites';
         const LC_SCOPE_KEY    = 'lc_link_scope';
+        const LC_DEFAULTS_KEY = 'lc_default_options';
+
+        let _lcSetDefaultTimer = null; // auto-cancel timer for Set Default confirm step
 
         // ── Tiny helpers ─────────────────────────────────────────────────────────
         async function lcGet(path) {
@@ -4943,6 +4950,16 @@
         });
 
         function closeLcSiteSelectModal() {
+            // Reset Set Default button if it was mid-confirm
+            const setBtn = document.getElementById('lcSetDefaultBtn');
+            if (setBtn.dataset.state === 'confirm') {
+                clearTimeout(_lcSetDefaultTimer);
+                setBtn.dataset.state   = 'idle';
+                setBtn.textContent     = 'Set Default';
+                setBtn.style.background   = '';
+                setBtn.style.borderColor  = '';
+                setBtn.style.color        = '';
+            }
             document.getElementById('lcSiteSelectOverlay').style.display = 'none';
         }
 
@@ -4988,6 +5005,104 @@
         document.getElementById('lcSiteSelectDoneBtn').addEventListener('click', closeLcSiteSelectModal);
         document.getElementById('lcSiteSelectOverlay').addEventListener('click', e => {
             if (e.target === e.currentTarget) closeLcSiteSelectModal();
+        });
+
+        // ── Default options (Restore / Set) ───────────────────────────────────────
+
+        /** Apply saved or factory defaults to scope toggles + site selection. */
+        function restoreLcDefaults() {
+            let defaults = null;
+            try {
+                defaults = JSON.parse(localStorage.getItem(LC_DEFAULTS_KEY) || 'null');
+            } catch { /* ignore */ }
+
+            if (defaults) {
+                _lcCheckInternal = defaults.internal !== false;
+                _lcCheckExternal = !!defaults.external;
+                if (defaults.site_ids === null) {
+                    // null means "all sites"
+                    _lcSelectedIds = new Set(_lcSiteList.map(s => String(s.id)));
+                } else if (Array.isArray(defaults.site_ids)) {
+                    const valid = new Set(_lcSiteList.map(s => String(s.id)));
+                    _lcSelectedIds = new Set(
+                        defaults.site_ids.filter(id => valid.has(String(id))).map(String)
+                    );
+                    // If none of the saved sites exist any more, fall back to all
+                    if (_lcSelectedIds.size === 0) {
+                        _lcSelectedIds = new Set(_lcSiteList.map(s => String(s.id)));
+                    }
+                }
+            } else {
+                // Factory defaults
+                _lcCheckInternal = true;
+                _lcCheckExternal = false;
+                _lcSelectedIds   = new Set(_lcSiteList.map(s => String(s.id)));
+            }
+
+            // Persist the restored values as the current selection
+            saveLcScope();
+            saveLcSelectedSites();
+
+            // Refresh UI
+            syncLcScopeButtons();
+            renderLcSiteSelectList(); // redraws checkboxes
+            updateLcSiteCountBadge();
+        }
+
+        /** Save the current scope + site selection as the new default. */
+        function lcSaveAsDefault() {
+            localStorage.setItem(LC_DEFAULTS_KEY, JSON.stringify({
+                internal:  _lcCheckInternal,
+                external:  _lcCheckExternal,
+                // null = all sites (more resilient to sites being added later)
+                site_ids:  _lcSelectedIds.size === _lcSiteList.length
+                    ? null
+                    : [..._lcSelectedIds],
+            }));
+        }
+
+        document.getElementById('lcRestoreDefaultBtn').addEventListener('click', () => {
+            restoreLcDefaults();
+            // Brief visual confirmation
+            const btn = document.getElementById('lcRestoreDefaultBtn');
+            btn.textContent = 'Restored ✓';
+            btn.style.color = 'var(--green)';
+            setTimeout(() => {
+                btn.textContent = 'Restore Default';
+                btn.style.color = '';
+            }, 1800);
+        });
+
+        document.getElementById('lcSetDefaultBtn').addEventListener('click', () => {
+            const btn = document.getElementById('lcSetDefaultBtn');
+            if (btn.dataset.state === 'confirm') {
+                // Second click — confirmed
+                clearTimeout(_lcSetDefaultTimer);
+                lcSaveAsDefault();
+                btn.dataset.state   = 'idle';
+                btn.textContent     = 'Saved ✓';
+                btn.style.background   = '';
+                btn.style.borderColor  = '';
+                btn.style.color        = 'var(--green)';
+                _lcSetDefaultTimer = setTimeout(() => {
+                    btn.textContent  = 'Set Default';
+                    btn.style.color  = '';
+                }, 1800);
+            } else {
+                // First click — enter confirm state (auto-cancels after 3 s)
+                btn.dataset.state   = 'confirm';
+                btn.textContent     = 'Confirm?';
+                btn.style.background   = 'var(--accent)';
+                btn.style.borderColor  = 'var(--accent)';
+                btn.style.color        = '#fff';
+                _lcSetDefaultTimer = setTimeout(() => {
+                    btn.dataset.state  = 'idle';
+                    btn.textContent    = 'Set Default';
+                    btn.style.background  = '';
+                    btn.style.borderColor = '';
+                    btn.style.color       = '';
+                }, 3000);
+            }
         });
 
         // ── CSV export ────────────────────────────────────────────────────────────
