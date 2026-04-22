@@ -1015,8 +1015,8 @@
                             <th style="width:40px;">Status</th>
                             <th>Date</th>
                             <th style="text-align:right; width:80px;">Links</th>
-                            <th style="text-align:right; width:80px;">Broken</th>
                             <th style="text-align:right; width:80px;">Working</th>
+                            <th style="text-align:right; width:80px;">Broken</th>
                         </tr></thead>
                         <tbody id="lcSiteHistoryBody"></tbody>
                     </table>
@@ -4219,8 +4219,8 @@
                 <th>Site</th>
                 <th style="width:130px;">Last Checked</th>
                 <th style="text-align:right; width:80px;">Links</th>
-                <th style="text-align:right; width:80px;">Broken</th>
                 <th style="text-align:right; width:80px;">Working</th>
+                <th style="text-align:right; width:80px;">Broken</th>
             </tr>`;
 
             try {
@@ -4231,10 +4231,10 @@
                 _lcRuns = runs;
                 renderLcRunSelector();
                 _lcLatestRunMeta = runs.find(r => r.status === 'completed') || null;
-                if (_lcLatestRunMeta) updateLcSummaryCards(_lcLatestRunMeta);
 
                 const statusById = {};
                 for (const s of siteStatus) statusById[String(s.site_id)] = s;
+                updateLcSummaryFromSiteStatus(siteStatus);
                 renderLcSiteStatusTable(statusById);
             } catch (e) {
                 renderLcTableError(`Error loading site status: ${e.message}`);
@@ -4303,8 +4303,8 @@
                     </td>
                     <td style="font-size:12px; color:var(--text-muted);">${lastChecked}</td>
                     <td style="text-align:right; font-size:13px;">${fmt(total)}</td>
-                    <td style="text-align:right; font-size:13px;">${brokenCell}</td>
                     <td style="text-align:right; font-size:13px;">${workingCell}</td>
+                    <td style="text-align:right; font-size:13px;">${brokenCell}</td>
                 </tr>`;
             });
 
@@ -4387,8 +4387,8 @@
                         <td style="text-align:center;">${icon}</td>
                         <td style="font-size:13px;">${dateStr}</td>
                         <td style="text-align:right;">${total.toLocaleString()}</td>
-                        <td style="text-align:right;">${brokenCell}${expandArrow}</td>
                         <td style="text-align:right;">${workingCell}</td>
+                        <td style="text-align:right;">${brokenCell}${expandArrow}</td>
                     </tr>`;
 
                     if (broken > 0) {
@@ -4412,7 +4412,7 @@
                         if (!expandEl) return;
 
                         const isOpen = expandEl.classList.toggle('open');
-                        const arrow  = row.querySelector('td:nth-child(4) span:last-child');
+                        const arrow  = row.querySelector('td:nth-child(5) span:last-child');
                         if (arrow && arrow.textContent.trim().match(/[▼▲]/)) {
                             arrow.textContent = isOpen ? ' ▲' : ' ▼';
                         }
@@ -4553,8 +4553,8 @@
                 <th style="width:40px;">Status</th>
                 <th>Site</th>
                 <th style="text-align:right; width:80px;">Links</th>
-                <th style="text-align:right; width:80px;">Broken</th>
                 <th style="text-align:right; width:80px;">Working</th>
+                <th style="text-align:right; width:80px;">Broken</th>
             </tr>`;
 
             updateLcSummaryCards(run);
@@ -4606,8 +4606,8 @@
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(domain)}</div>
                     </td>
                     <td style="text-align:right; font-size:13px;">${total.toLocaleString()}</td>
-                    <td style="text-align:right; font-size:13px;">${brokenCell}${expandArrow}</td>
                     <td style="text-align:right; font-size:13px;">${workingCell}</td>
+                    <td style="text-align:right; font-size:13px;">${brokenCell}${expandArrow}</td>
                 </tr>`;
 
                 if (hasBroken) {
@@ -4627,7 +4627,7 @@
                     const key = row.dataset.siteKey;
                     const expandEl = body.querySelector(`.lc-expand[data-site-key="${CSS.escape(key)}"]`);
                     if (!expandEl) return;
-                    const arrow = row.querySelector('td:nth-child(4) span:last-child');
+                    const arrow = row.querySelector('td:nth-child(5) span:last-child');
                     const isOpen = expandEl.classList.toggle('open');
                     if (isOpen) _lcExpandedSites.add(key); else _lcExpandedSites.delete(key);
                     if (arrow && arrow.textContent.trim().match(/[▼▲]/)) {
@@ -4637,7 +4637,9 @@
             });
         }
 
-        // ── Summary cards helper ──────────────────────────────────────────────────
+        // ── Summary cards helpers ─────────────────────────────────────────────────
+
+        /** Used by Runs view — totals come directly from the single run record. */
         function updateLcSummaryCards(run) {
             document.getElementById('lcStatSites').textContent = run.total_sites ?? '—';
             document.getElementById('lcStatPages').textContent = (run.total_pages_crawled ?? 0).toLocaleString();
@@ -4646,6 +4648,27 @@
             const el = document.getElementById('lcStatBroken');
             el.textContent = broken.toLocaleString();
             el.style.color = broken > 0 ? 'var(--red)' : 'var(--green)';
+            document.getElementById('lcSummary').style.display = '';
+        }
+
+        /**
+         * Used by Sites view — aggregates across each site's own most recent run
+         * so the cards reflect what the table shows, not a single global run.
+         */
+        function updateLcSummaryFromSiteStatus(siteStatusList) {
+            if (!siteStatusList.length) {
+                document.getElementById('lcSummary').style.display = 'none';
+                return;
+            }
+            const totalPages  = siteStatusList.reduce((s, r) => s + (r.pages_crawled  ?? 0), 0);
+            const totalLinks  = siteStatusList.reduce((s, r) => s + (r.links_checked  ?? 0), 0);
+            const totalBroken = siteStatusList.reduce((s, r) => s + (r.broken_count   ?? 0), 0);
+            document.getElementById('lcStatSites').textContent = siteStatusList.length.toLocaleString();
+            document.getElementById('lcStatPages').textContent = totalPages.toLocaleString();
+            document.getElementById('lcStatLinks').textContent = totalLinks.toLocaleString();
+            const el = document.getElementById('lcStatBroken');
+            el.textContent = totalBroken.toLocaleString();
+            el.style.color = totalBroken > 0 ? 'var(--red)' : 'var(--green)';
             document.getElementById('lcSummary').style.display = '';
         }
 
@@ -4871,7 +4894,7 @@
 
         function exportLcSiteStatusCsv() {
             const today = new Date().toISOString().slice(0, 10);
-            const rows = [['Site', 'Domain', 'Last Checked', 'Run ID', 'Total Links', 'Broken', 'Working', 'Pages Crawled']];
+            const rows = [['Site', 'Domain', 'Last Checked', 'Run ID', 'Pages Crawled', 'Total Links', 'Working', 'Broken']];
             const activeSites = _lcSiteList.filter(s => !s.is_removed);
             activeSites.forEach(site => {
                 const st = _lcLastSiteStatusData[String(site.id)];
@@ -4884,7 +4907,7 @@
                 const lastChecked = st?.run_started_at
                     ? new Date(st.run_started_at + 'Z').toISOString().slice(0, 16).replace('T', ' ')
                     : '';
-                rows.push([site.name || '', domain, lastChecked, runId, total, broken, working, pages]);
+                rows.push([site.name || '', domain, lastChecked, runId, pages, total, working, broken]);
             });
             downloadCsv(rows, `link-check-sites-${today}.csv`);
         }
@@ -4901,7 +4924,7 @@
                  run.total_sites ?? 0, run.total_pages_crawled ?? 0,
                  run.total_links_checked ?? 0, run.total_broken ?? 0],
                 [],
-                ['Site', 'Domain', 'Pages Crawled', 'Links Checked', 'Broken', 'Working',
+                ['Site', 'Domain', 'Pages Crawled', 'Links Checked', 'Working', 'Broken',
                  '(Broken) Status/Error', '(Broken) Link URL', '(Broken) Found On'],
             ];
             sites.forEach(site => {
@@ -4909,7 +4932,7 @@
                 const broken = site.broken_count  ?? 0;
                 const domain = (site.site_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
                 rows.push([site.site_name || '', domain,
-                    site.pages_crawled ?? 0, total, broken, total - broken,
+                    site.pages_crawled ?? 0, total, total - broken, broken,
                     '', '', '']);
                 (site.broken_links || []).forEach(link => {
                     rows.push(['', '', '', '', '', '',
@@ -4925,7 +4948,7 @@
             const siteName = (_lcCurrentHistorySite.name || 'site')
                 .replace(/[^a-z0-9]/gi, '-').toLowerCase();
             const today = new Date().toISOString().slice(0, 10);
-            const rows = [['Date', 'Run ID', 'Pages Crawled', 'Total Links', 'Broken', 'Working']];
+            const rows = [['Date', 'Run ID', 'Pages Crawled', 'Total Links', 'Working', 'Broken']];
             _lcLastHistoryData.forEach(r => {
                 const d = new Date((r.started_at || '') + 'Z');
                 const total  = r.links_checked ?? 0;
@@ -4934,7 +4957,7 @@
                     d.toISOString().slice(0, 16).replace('T', ' '),
                     r.run_id ?? '',
                     r.pages_crawled ?? 0,
-                    total, broken, total - broken,
+                    total, total - broken, broken,
                 ]);
             });
             downloadCsv(rows, `link-check-history-${siteName}-${today}.csv`);
