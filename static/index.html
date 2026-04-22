@@ -527,14 +527,15 @@
         .lc-site-row:hover td { background: var(--surface-2); }
         .lc-site-row td { transition: background 0.1s; }
         .lc-expand { display: none; }
-        .lc-expand.open { display: table-row-group; }
-        .lc-broken-row td {
+        .lc-expand.open { display: table-row; }
+        .lc-expand-cell { padding: 0 !important; }
+        .lc-broken-row {
             padding: 6px 14px 6px 40px;
             font-size: 12px;
             border-bottom: 1px solid var(--border);
             background: var(--surface-2);
         }
-        .lc-broken-row:last-child td { border-bottom: none; }
+        .lc-broken-row:last-child { border-bottom: none; }
         .lc-badge {
             display: inline-block;
             padding: 1px 7px;
@@ -952,6 +953,7 @@
                 <div style="flex:1;"></div>
                 <select id="lcRunSelect" class="filter-input" style="min-width:200px; max-width:320px; font-size:12px; display:none;"></select>
                 <span id="lcRunInfo" style="font-size:12px; color:var(--text-muted);"></span>
+                <button class="btn" id="lcExportBtn" style="font-size:12px; padding:5px 12px;" title="Export current view to CSV">⬇ CSV</button>
             </div>
 
             <!-- Progress bar (shown during a run) -->
@@ -1002,7 +1004,7 @@
             <div id="lcSiteHistoryPanel" style="display:none;">
                 <div style="display:flex; align-items:center; gap:12px; padding:12px 0 12px;">
                     <button class="btn" id="lcSiteHistoryBackBtn" style="font-size:12px; padding:4px 10px;">&#x2190; All Sites</button>
-                    <div>
+                    <div style="flex:1;">
                         <div id="lcSiteHistoryTitle" style="font-size:14px; font-weight:600;"></div>
                         <div id="lcSiteHistoryUrl" style="font-size:11px; color:var(--text-muted);"></div>
                     </div>
@@ -4136,6 +4138,12 @@
         let _lcExpandedSites = new Set(); // site keys with expanded rows (runs view)
         let _lcLatestRunMeta = null;      // metadata from latest completed run
 
+        // Export state — snapshot of last-rendered data for CSV download
+        let _lcLastSiteStatusData = {};   // statusById from last renderLcSiteStatusTable
+        let _lcLastRunData = null;        // run object from last renderLcRunsView
+        let _lcLastHistoryData = [];      // rows from last loadLcSiteHistory
+        let _lcCurrentHistorySite = { id: null, name: '', url: '' };
+
         const LC_STORAGE_KEY = 'lc_selected_sites';
 
         // ── Tiny helpers ─────────────────────────────────────────────────────────
@@ -4234,6 +4242,7 @@
         }
 
         function renderLcSiteStatusTable(statusById) {
+            _lcLastSiteStatusData = statusById; // snapshot for CSV export
             const body = document.getElementById('lcBody');
             const empty = document.getElementById('lcEmpty');
 
@@ -4310,6 +4319,7 @@
 
         // ── Per-site history ──────────────────────────────────────────────────────
         function openLcSiteHistory(siteId, siteName, siteUrl) {
+            _lcCurrentHistorySite = { id: siteId, name: siteName || '', url: siteUrl || '' };
             document.getElementById('lcTableWrap').style.display = 'none';
             document.getElementById('lcSummary').style.display = 'none';
             document.getElementById('lcSiteHistoryPanel').style.display = '';
@@ -4338,6 +4348,7 @@
             empty.style.display = 'none';
             try {
                 const history = await lcGet(`/api/linkcheck/site/${siteId}/history`);
+                _lcLastHistoryData = history; // snapshot for CSV export
                 if (!history.length) {
                     tbody.innerHTML = '';
                     empty.style.display = '';
@@ -4367,25 +4378,25 @@
                         + lcDeltaBadge(working, prevWorking, false);
                     const rowBg = broken > 0 ? 'background:var(--yellow-bg);' : '';
                     const expandId = `lc-hist-expand-${idx}`;
+                    const expandArrow = broken > 0
+                        ? `<span style="font-size:11px; color:var(--text-muted); margin-left:4px;">▼</span>`
+                        : '';
 
-                    html += `<tr class="lc-site-row" style="cursor:pointer; ${rowBg}"
-                            data-run-id="${r.run_id}" data-site-id="${siteId}" data-expand-id="${expandId}">
+                    html += `<tr class="lc-site-row" style="cursor:${broken > 0 ? 'pointer' : 'default'}; ${rowBg}"
+                            data-run-id="${r.run_id}" data-site-id="${escapeHtml(String(siteId))}" data-expand-id="${expandId}">
                         <td style="text-align:center;">${icon}</td>
                         <td style="font-size:13px;">${dateStr}</td>
                         <td style="text-align:right;">${total.toLocaleString()}</td>
-                        <td style="text-align:right;">${brokenCell}</td>
+                        <td style="text-align:right;">${brokenCell}${expandArrow}</td>
                         <td style="text-align:right;">${workingCell}</td>
                     </tr>`;
 
                     if (broken > 0) {
-                        // Placeholder tbody for lazy-loaded broken links
-                        html += `<tbody id="${expandId}" class="lc-expand" data-loaded="false">
-                            <tr class="lc-broken-row">
-                                <td colspan="${COLS}" style="text-align:center; color:var(--text-muted); font-size:12px; padding:10px;">
-                                    Click to expand broken links
-                                </td>
-                            </tr>
-                        </tbody>`;
+                        // Expand row — a plain <tr> (no nested tbody) with an empty <td>
+                        // Content is lazy-loaded on first click
+                        html += `<tr id="${expandId}" class="lc-expand" data-loaded="false">
+                            <td colspan="${COLS}" class="lc-expand-cell"></td>
+                        </tr>`;
                     }
                 });
 
@@ -4393,27 +4404,30 @@
 
                 tbody.querySelectorAll('tr[data-run-id]').forEach(row => {
                     row.addEventListener('click', async () => {
-                        const runId    = row.dataset.runId;
+                        const runId      = row.dataset.runId;
                         const thisSiteId = row.dataset.siteId;
-                        const expandId = row.dataset.expandId;
+                        const expandId   = row.dataset.expandId;
                         if (!expandId) return;
                         const expandEl = document.getElementById(expandId);
                         if (!expandEl) return;
 
                         const isOpen = expandEl.classList.toggle('open');
+                        const arrow  = row.querySelector('td:nth-child(4) span:last-child');
+                        if (arrow && arrow.textContent.trim().match(/[▼▲]/)) {
+                            arrow.textContent = isOpen ? ' ▲' : ' ▼';
+                        }
                         if (!isOpen) return;
 
                         // Lazy-load broken links the first time
                         if (expandEl.dataset.loaded !== 'true') {
-                            expandEl.innerHTML = `<tr class="lc-broken-row"><td colspan="${COLS}"
-                                style="text-align:center; color:var(--text-muted); font-size:12px; padding:10px;">Loading…</td></tr>`;
+                            const cell = expandEl.querySelector('td');
+                            cell.innerHTML = `<div class="lc-broken-row" style="text-align:center; color:var(--text-muted); padding:10px;">Loading…</div>`;
                             try {
                                 const links = await lcGet(`/api/linkcheck/results/${runId}/site/${thisSiteId}`);
-                                expandEl.innerHTML = lcBrokenLinksHtml(links, COLS);
+                                cell.innerHTML = lcBrokenLinksHtml(links);
                                 expandEl.dataset.loaded = 'true';
                             } catch (e) {
-                                expandEl.innerHTML = `<tr class="lc-broken-row"><td colspan="${COLS}"
-                                    style="color:var(--red); padding:10px;">${escapeHtml(e.message)}</td></tr>`;
+                                cell.innerHTML = `<div class="lc-broken-row" style="color:var(--red); padding:10px;">${escapeHtml(e.message)}</div>`;
                             }
                         }
                     });
@@ -4494,13 +4508,13 @@
         }
 
         // ── Shared helper: render a list of broken link rows ─────────────────────
-        function lcBrokenLinksHtml(links, colspan) {
+        // Returns <div class="lc-broken-row"> elements — used inside a <td> wrapper,
+        // not directly as <tr> elements, avoiding the invalid nested-tbody pattern.
+        function lcBrokenLinksHtml(links) {
             if (!links.length) {
-                return `<tr class="lc-broken-row">
-                    <td colspan="${colspan}" style="text-align:center; color:var(--green); font-size:12px; padding:10px;">
-                        ✓ No broken links
-                    </td>
-                </tr>`;
+                return `<div class="lc-broken-row" style="text-align:center; color:var(--green);">
+                    ✓ No broken links
+                </div>`;
             }
             return links.map(link => {
                 const statusLabel = link.status_code
@@ -4511,26 +4525,25 @@
                     : `<span class="lc-badge lc-badge-internal">Internal</span>`;
                 const srcShort  = (link.source_page || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 60) || '/';
                 const linkShort = (link.link_url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 80) || link.link_url;
-                return `<tr class="lc-broken-row">
-                    <td colspan="${colspan}">
-                        <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;">
-                            ${statusLabel}
-                            ${badge}
-                            <a href="${escapeHtml(link.link_url || '#')}" target="_blank" rel="noopener"
-                               style="color:var(--accent); font-size:12px; word-break:break-all;"
-                               title="${escapeHtml(link.link_url || '')}">${escapeHtml(linkShort)}</a>
-                        </div>
-                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                            Found on:
-                            <a href="${escapeHtml(link.source_page || '#')}" target="_blank" rel="noopener"
-                               style="color:var(--text-muted);">${escapeHtml(srcShort)}</a>
-                        </div>
-                    </td>
-                </tr>`;
+                return `<div class="lc-broken-row">
+                    <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;">
+                        ${statusLabel}
+                        ${badge}
+                        <a href="${escapeHtml(link.link_url || '#')}" target="_blank" rel="noopener"
+                           style="color:var(--accent); font-size:12px; word-break:break-all;"
+                           title="${escapeHtml(link.link_url || '')}">${escapeHtml(linkShort)}</a>
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                        Found on:
+                        <a href="${escapeHtml(link.source_page || '#')}" target="_blank" rel="noopener"
+                           style="color:var(--text-muted);">${escapeHtml(srcShort)}</a>
+                    </div>
+                </div>`;
             }).join('');
         }
 
         function renderLcRunsView(run) {
+            _lcLastRunData = run; // snapshot for CSV export
             const sites = run.sites || [];
             const body  = document.getElementById('lcBody');
             const empty = document.getElementById('lcEmpty');
@@ -4598,11 +4611,12 @@
                 </tr>`;
 
                 if (hasBroken) {
-                    // broken_links are pre-loaded from the API response
+                    // Expand row — plain <tr> (no nested tbody) avoids invalid HTML.
+                    // broken_links are pre-loaded from the API response.
                     const preloaded = site.broken_links || [];
-                    html += `<tbody class="lc-expand${isExpanded ? ' open' : ''}" data-site-key="${escapeHtml(key)}" data-loaded="true">
-                        ${lcBrokenLinksHtml(preloaded, COLS)}
-                    </tbody>`;
+                    html += `<tr class="lc-expand${isExpanded ? ' open' : ''}" data-site-key="${escapeHtml(key)}" data-loaded="true">
+                        <td colspan="${COLS}" class="lc-expand-cell">${lcBrokenLinksHtml(preloaded)}</td>
+                    </tr>`;
                 }
             });
 
@@ -4611,12 +4625,14 @@
             body.querySelectorAll('.lc-site-row').forEach(row => {
                 row.addEventListener('click', () => {
                     const key = row.dataset.siteKey;
-                    const expandEl = document.querySelector(`.lc-expand[data-site-key="${CSS.escape(key)}"]`);
+                    const expandEl = body.querySelector(`.lc-expand[data-site-key="${CSS.escape(key)}"]`);
                     if (!expandEl) return;
                     const arrow = row.querySelector('td:nth-child(4) span:last-child');
                     const isOpen = expandEl.classList.toggle('open');
                     if (isOpen) _lcExpandedSites.add(key); else _lcExpandedSites.delete(key);
-                    if (arrow) arrow.textContent = isOpen ? ' ▲' : ' ▼';
+                    if (arrow && arrow.textContent.trim().match(/[▼▲]/)) {
+                        arrow.textContent = isOpen ? ' ▲' : ' ▼';
+                    }
                 });
             });
         }
@@ -4834,6 +4850,105 @@
         document.getElementById('lcSiteSelectDoneBtn').addEventListener('click', closeLcSiteSelectModal);
         document.getElementById('lcSiteSelectOverlay').addEventListener('click', e => {
             if (e.target === e.currentTarget) closeLcSiteSelectModal();
+        });
+
+        // ── CSV export ────────────────────────────────────────────────────────────
+        function downloadCsv(rows, filename) {
+            const lines = rows.map(row =>
+                row.map(cell => {
+                    const s = String(cell ?? '');
+                    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+                        ? `"${s.replace(/"/g, '""')}"` : s;
+                }).join(',')
+            );
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+
+        function exportLcSiteStatusCsv() {
+            const today = new Date().toISOString().slice(0, 10);
+            const rows = [['Site', 'Domain', 'Last Checked', 'Run ID', 'Total Links', 'Broken', 'Working', 'Pages Crawled']];
+            const activeSites = _lcSiteList.filter(s => !s.is_removed);
+            activeSites.forEach(site => {
+                const st = _lcLastSiteStatusData[String(site.id)];
+                const total    = st ? (st.links_checked ?? 0) : '';
+                const broken   = st ? (st.broken_count  ?? 0) : '';
+                const working  = (total !== '' && broken !== '') ? total - broken : '';
+                const pages    = st ? (st.pages_crawled ?? 0) : '';
+                const runId    = st ? (st.run_id ?? '') : '';
+                const domain   = (site.url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+                const lastChecked = st?.run_started_at
+                    ? new Date(st.run_started_at + 'Z').toISOString().slice(0, 16).replace('T', ' ')
+                    : '';
+                rows.push([site.name || '', domain, lastChecked, runId, total, broken, working, pages]);
+            });
+            downloadCsv(rows, `link-check-sites-${today}.csv`);
+        }
+
+        function exportLcRunsCsv() {
+            if (!_lcLastRunData) return;
+            const run = _lcLastRunData;
+            const sites = run.sites || [];
+            const d = new Date((run.started_at || '') + 'Z');
+            const dateStr = d.toISOString().slice(0, 10);
+            const rows = [
+                ['Run ID', 'Started', 'Finished', 'Status', 'Total Sites', 'Pages Crawled', 'Links Checked', 'Broken'],
+                [run.id ?? '', run.started_at ?? '', run.finished_at ?? '', run.status ?? '',
+                 run.total_sites ?? 0, run.total_pages_crawled ?? 0,
+                 run.total_links_checked ?? 0, run.total_broken ?? 0],
+                [],
+                ['Site', 'Domain', 'Pages Crawled', 'Links Checked', 'Broken', 'Working',
+                 '(Broken) Status/Error', '(Broken) Link URL', '(Broken) Found On'],
+            ];
+            sites.forEach(site => {
+                const total  = site.links_checked ?? 0;
+                const broken = site.broken_count  ?? 0;
+                const domain = (site.site_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+                rows.push([site.site_name || '', domain,
+                    site.pages_crawled ?? 0, total, broken, total - broken,
+                    '', '', '']);
+                (site.broken_links || []).forEach(link => {
+                    rows.push(['', '', '', '', '', '',
+                        link.status_code || link.error || '',
+                        link.link_url    || '',
+                        link.source_page || '']);
+                });
+            });
+            downloadCsv(rows, `link-check-run-${run.id ?? 0}-${dateStr}.csv`);
+        }
+
+        function exportLcSiteHistoryCsv() {
+            const siteName = (_lcCurrentHistorySite.name || 'site')
+                .replace(/[^a-z0-9]/gi, '-').toLowerCase();
+            const today = new Date().toISOString().slice(0, 10);
+            const rows = [['Date', 'Run ID', 'Pages Crawled', 'Total Links', 'Broken', 'Working']];
+            _lcLastHistoryData.forEach(r => {
+                const d = new Date((r.started_at || '') + 'Z');
+                const total  = r.links_checked ?? 0;
+                const broken = r.broken_count  ?? 0;
+                rows.push([
+                    d.toISOString().slice(0, 16).replace('T', ' '),
+                    r.run_id ?? '',
+                    r.pages_crawled ?? 0,
+                    total, broken, total - broken,
+                ]);
+            });
+            downloadCsv(rows, `link-check-history-${siteName}-${today}.csv`);
+        }
+
+        document.getElementById('lcExportBtn').addEventListener('click', () => {
+            const historyPanel = document.getElementById('lcSiteHistoryPanel');
+            if (historyPanel.style.display !== 'none') {
+                exportLcSiteHistoryCsv();
+            } else if (_lcViewMode === 'runs') {
+                exportLcRunsCsv();
+            } else {
+                exportLcSiteStatusCsv();
+            }
         });
 
 
