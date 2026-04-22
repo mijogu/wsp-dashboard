@@ -603,6 +603,31 @@
         .cf-val-flexible { color: var(--yellow); }
         .cf-val-devmode  { color: var(--red, #f87171); font-weight: 600; }
         .cf-val-outlier  { outline: 2px solid var(--yellow); border-radius: 3px; }
+        .cf-settings-table th.sortable { cursor: pointer; user-select: none; }
+        .cf-settings-table th.sortable:hover { color: var(--accent); }
+
+        /* ── Site Dashboard ─────────────────────────────────────── */
+        .sd-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .sd-title  { font-weight: 600; font-size: 16px; }
+        .sd-meta   { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+        .sd-spacer { flex: 1; }
+        .sd-card   { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
+        .sd-card-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+        .sd-card-title .sd-card-actions { margin-left: auto; display: flex; gap: 6px; }
+        .hb-grid { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+        .hb-item { display: flex; align-items: center; gap: 5px; font-size: 13px; }
+        .hb-label { color: var(--text-muted); }
+        .hb-pass  { color: #4ade80; font-weight: 600; }
+        .hb-fail  { color: var(--red, #f87171); font-weight: 600; }
+        .hb-unknown { color: var(--text-muted); }
+        .hb-none  { color: var(--text-muted); }
+        .hb-custom { color: var(--yellow); }
+        .hb-bba   { color: #4ade80; font-weight: 600; }
+        .hb-expiry-warn { color: var(--yellow); font-weight: 600; }
+        .hb-expiry-danger { color: var(--red, #f87171); font-weight: 600; }
+        .hb-toggle-details { font-size: 11px; color: var(--accent); cursor: pointer; background: none; border: none; padding: 0; }
+        .hb-details-panel { margin-top: 10px; font-size: 12px; font-family: monospace; background: var(--surface-2); border-radius: 6px; padding: 10px; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; display: none; }
+        .sd-section-empty { font-size: 13px; color: var(--text-muted); padding: 8px 0; }
     </style>
 </head>
 <body>
@@ -1164,6 +1189,50 @@
                     <tbody id="sitesBody"></tbody>
                 </table>
             </div>
+            <!-- Site Dashboard mode -->
+            <div id="siteDashboard" style="display:none;">
+                <div class="sd-header">
+                    <button class="btn" id="sdBackBtn">&larr; All Sites</button>
+                    <div>
+                        <div class="sd-title" id="sdName"></div>
+                        <div class="sd-meta" id="sdMeta"></div>
+                    </div>
+                    <div class="sd-spacer"></div>
+                    <button class="btn" id="sdEditBtn">Edit Site</button>
+                </div>
+
+                <!-- Heartbeat card -->
+                <div class="sd-card">
+                    <div class="sd-card-title">
+                        Heartbeat
+                        <span id="sdHbLastScan" style="font-weight:400; text-transform:none; font-size:11px;"></span>
+                        <div class="sd-card-actions">
+                            <button class="btn" id="sdHbRescanBtn" style="font-size:12px; padding:4px 10px;">Rescan</button>
+                            <button class="btn" id="sdHbCancelBtn" style="font-size:12px; padding:4px 10px; display:none;">Cancel</button>
+                        </div>
+                    </div>
+                    <div id="sdHbContent"><div class="sd-section-empty">No scan data yet — click Rescan to start.</div></div>
+                </div>
+
+                <!-- Regression history -->
+                <div class="sd-card">
+                    <div class="sd-card-title">Regression History</div>
+                    <div id="sdRegressionContent"><div class="sd-section-empty">Loading…</div></div>
+                </div>
+
+                <!-- Link check history -->
+                <div class="sd-card">
+                    <div class="sd-card-title">Link Check History</div>
+                    <div id="sdLinkCheckContent"><div class="sd-section-empty">Loading…</div></div>
+                </div>
+
+                <!-- Update history -->
+                <div class="sd-card">
+                    <div class="sd-card-title">Update History</div>
+                    <div id="sdUpdateContent"><div class="sd-section-empty">Loading…</div></div>
+                </div>
+            </div>
+
             <!-- Detail mode -->
             <div id="siteDetail" style="display:none;">
                 <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
@@ -1814,7 +1883,15 @@
                 loadDbStats();
                 if (!historyData.length) loadCachedHistory(true);
             }
-            if (tabName === 'sites' && !_sitesList.length) loadSitesTab();
+            if (tabName === 'sites') {
+                // Return to list view if dashboard or detail was open
+                document.getElementById('siteDashboard').style.display = 'none';
+                document.getElementById('siteDetail').style.display = 'none';
+                document.getElementById('sitesListView').style.display = '';
+                clearTimeout(_sdHbPollTimer);
+                _sdSiteId = null;
+                if (!_sitesList.length) loadSitesTab();
+            }
             if (tabName === 'settings') loadSettingsData();
             if (tabName === 'linkchecker') loadLinkChecker();
             if (tabName === 'onboarding') loadOnboarding();
@@ -2142,6 +2219,9 @@
             { id: 'development_mode',          label: 'Dev Mode' },
         ];
 
+        let _cfSettingsSortKey = null;
+        let _cfSettingsSortDir = 1;
+
         async function renderCfSettings() {
             const zones = appState.data.cloudflare?.result || [];
             const el = document.getElementById('cfSettingsContent');
@@ -2181,22 +2261,45 @@
                 return;
             }
 
-            const thead = '<tr><th>Setting</th>' + zones.map(z => `<th>${z.name}</th>`).join('') + '</tr>';
-            let tbody = '';
+            // Pre-compute majority value per setting column
+            const majorityByKey = {};
             for (const key of relevantKeys) {
-                const vals = zoneSettings.map(s => s[key.id] ?? '—');
-                const maj = majority(vals.filter(v => v !== '—'));
-                const cells = vals.map(v => {
-                    const cls = cfValClass(key.id, v);
-                    const outlier = v !== '—' && String(v) !== maj ? ' cf-val-outlier' : '';
+                const vals = zoneSettings.map(s => String(s[key.id] ?? '—')).filter(v => v !== '—');
+                majorityByKey[key.id] = majority(vals);
+            }
+
+            // Sort zones
+            let rows = zones.map((z, i) => ({ zone: z, settings: zoneSettings[i] }));
+            if (_cfSettingsSortKey) {
+                rows.sort((a, b) => {
+                    const va = String(a.settings[_cfSettingsSortKey] ?? '');
+                    const vb = String(b.settings[_cfSettingsSortKey] ?? '');
+                    return va.localeCompare(vb) * _cfSettingsSortDir;
+                });
+            }
+
+            const arrow = (key) => key === _cfSettingsSortKey ? (_cfSettingsSortDir > 0 ? ' ▲' : ' ▼') : '';
+
+            const thead = `<tr>
+                <th>Site</th>
+                ${relevantKeys.map(k =>
+                    `<th class="sortable" data-sort-key="${k.id}">${k.label}${arrow(k.id)}</th>`
+                ).join('')}
+            </tr>`;
+
+            const tbody = rows.map(({ zone, settings }) => {
+                const cells = relevantKeys.map(key => {
+                    const v = settings[key.id] ?? '—';
+                    const cls = cfValClass(key.id, String(v));
+                    const outlier = String(v) !== '—' && String(v) !== majorityByKey[key.id] ? ' cf-val-outlier' : '';
                     return `<td class="${cls}${outlier}">${v}</td>`;
                 }).join('');
-                tbody += `<tr><td><strong>${key.label}</strong></td>${cells}</tr>`;
-            }
+                return `<tr><td><strong>${escapeHtml(zone.name)}</strong></td>${cells}</tr>`;
+            }).join('');
 
             el.innerHTML = `
                 <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
-                    Yellow outline = value differs from the majority across zones.
+                    Yellow outline = value differs from majority. Click column headers to sort.
                 </p>
                 <div class="cf-settings-wrap">
                     <table class="cf-settings-table">
@@ -2204,6 +2307,19 @@
                         <tbody>${tbody}</tbody>
                     </table>
                 </div>`;
+
+            el.querySelectorAll('th.sortable').forEach(th => {
+                th.addEventListener('click', () => {
+                    const key = th.dataset.sortKey;
+                    if (_cfSettingsSortKey === key) {
+                        _cfSettingsSortDir *= -1;
+                    } else {
+                        _cfSettingsSortKey = key;
+                        _cfSettingsSortDir = 1;
+                    }
+                    renderCfSettings();
+                });
+            });
         }
 
         // ============================================================================
@@ -4341,8 +4457,9 @@
                         <span style="color:${pageCount > 1 ? 'var(--accent)' : 'var(--text-muted)'}; font-weight:${pageCount > 1 ? '600' : '400'};">${pageCount}</span>
                     </td>
                     <td>${notesHtml}</td>
-                    <td style="text-align:right;">
-                        <button class="btn site-edit-btn" data-site-id="${s.id}" style="font-size:12px; padding:5px 10px;">Edit</button>
+                    <td style="text-align:right; white-space:nowrap;">
+                        <button class="btn site-hb-btn" data-site-id="${s.id}" style="font-size:12px; padding:5px 10px;" title="Run Heartbeat scan for this site">♥</button>
+                        <button class="btn site-edit-btn" data-site-id="${s.id}" style="font-size:12px; padding:5px 10px; margin-left:4px;">Edit</button>
                     </td>
                 </tr>`;
             };
@@ -4358,12 +4475,35 @@
 
             tbody.querySelectorAll('tr[data-site-id]').forEach(row => {
                 row.addEventListener('click', (e) => {
-                    if (e.target.closest('.site-edit-btn')) return;
-                    openSiteDetail(row.dataset.siteId);
+                    if (e.target.closest('.site-edit-btn') || e.target.closest('.site-hb-btn')) return;
+                    openSiteDashboard(row.dataset.siteId);
                 });
             });
             tbody.querySelectorAll('.site-edit-btn').forEach(btn => {
-                btn.addEventListener('click', () => openSiteDetail(btn.dataset.siteId));
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openSiteDetail(btn.dataset.siteId);
+                });
+            });
+            tbody.querySelectorAll('.site-hb-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const siteId = btn.dataset.siteId;
+                    btn.disabled = true;
+                    btn.textContent = '…';
+                    try {
+                        const resp = await fetch('/api/heartbeat/run', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ site_ids: [parseInt(siteId)] }),
+                        });
+                        const data = await resp.json();
+                        if (data.error) { alert(data.error); }
+                        else { openSiteDashboard(siteId); }
+                    } catch(err) { alert('Heartbeat start failed: ' + err.message); }
+                    btn.disabled = false;
+                    btn.textContent = '♥';
+                });
             });
         }
 
@@ -4410,6 +4550,265 @@
             document.getElementById('siteDetail').style.display = 'none';
             document.getElementById('sitesListView').style.display = '';
             _siteDetailId = null;
+        }
+
+        // ── Site Dashboard ───────────────────────────────────────────────────────────
+        let _sdSiteId = null;
+        let _sdHbPollTimer = null;
+
+        async function openSiteDashboard(siteId) {
+            const site = _sitesList.find(s => String(s.id) === String(siteId));
+            if (!site) return;
+            _sdSiteId = String(siteId);
+
+            document.getElementById('sdName').textContent = site.name;
+            const metaParts = [site.url || ''];
+            if (site.client_name) metaParts.push(site.client_name);
+            document.getElementById('sdMeta').textContent = metaParts.join(' · ');
+
+            document.getElementById('sitesListView').style.display = 'none';
+            document.getElementById('siteDetail').style.display = 'none';
+            document.getElementById('siteDashboard').style.display = '';
+
+            document.getElementById('sdHbContent').innerHTML =
+                '<div class="sd-section-empty">Loading…</div>';
+            document.getElementById('sdRegressionContent').innerHTML =
+                '<div class="sd-section-empty">Loading…</div>';
+            document.getElementById('sdLinkCheckContent').innerHTML =
+                '<div class="sd-section-empty">Loading…</div>';
+            document.getElementById('sdUpdateContent').innerHTML =
+                '<div class="sd-section-empty">Loading…</div>';
+
+            await Promise.all([
+                loadSdHeartbeat(),
+                loadSdRegression(),
+                loadSdLinkCheck(),
+                loadSdUpdates(),
+            ]);
+        }
+
+        function closeSiteDashboard() {
+            _sdSiteId = null;
+            clearTimeout(_sdHbPollTimer);
+            document.getElementById('siteDashboard').style.display = 'none';
+            document.getElementById('sitesListView').style.display = '';
+        }
+
+        document.getElementById('sdBackBtn').addEventListener('click', closeSiteDashboard);
+
+        document.getElementById('sdEditBtn').addEventListener('click', () => {
+            if (!_sdSiteId) return;
+            document.getElementById('siteDashboard').style.display = 'none';
+            openSiteDetail(_sdSiteId);
+        });
+
+        document.getElementById('sdHbRescanBtn').addEventListener('click', async () => {
+            if (!_sdSiteId) return;
+            const btn = document.getElementById('sdHbRescanBtn');
+            btn.disabled = true;
+            btn.textContent = 'Starting…';
+            try {
+                const resp = await fetch('/api/heartbeat/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ site_ids: [parseInt(_sdSiteId)] }),
+                });
+                const data = await resp.json();
+                if (data.error && resp.status !== 409) {
+                    alert(data.error);
+                } else {
+                    sdHbStartPolling();
+                }
+            } catch (e) { alert('Heartbeat start failed: ' + e.message); }
+            btn.disabled = false;
+            btn.textContent = 'Rescan';
+        });
+
+        document.getElementById('sdHbCancelBtn').addEventListener('click', async () => {
+            await fetch('/api/heartbeat/cancel', { method: 'POST' });
+        });
+
+        function sdHbStartPolling() {
+            clearTimeout(_sdHbPollTimer);
+            document.getElementById('sdHbCancelBtn').style.display = '';
+            document.getElementById('sdHbRescanBtn').disabled = true;
+            document.getElementById('sdHbLastScan').textContent = '(scanning…)';
+            _sdHbPollTimer = setTimeout(sdHbPollTick, 2000);
+        }
+
+        async function sdHbPollTick() {
+            if (!_sdSiteId) return;
+            try {
+                const resp = await fetch('/api/heartbeat/status');
+                const data = await resp.json();
+                if (data.running) {
+                    _sdHbPollTimer = setTimeout(sdHbPollTick, 2000);
+                } else {
+                    document.getElementById('sdHbCancelBtn').style.display = 'none';
+                    document.getElementById('sdHbRescanBtn').disabled = false;
+                    await loadSdHeartbeat();
+                }
+            } catch { _sdHbPollTimer = setTimeout(sdHbPollTick, 3000); }
+        }
+
+        function hbStatusIcon(status) {
+            if (status === 'pass') return '<span class="hb-pass">✓</span>';
+            if (status === 'fail') return '<span class="hb-fail">✗</span>';
+            return '<span class="hb-unknown">—</span>';
+        }
+
+        function hbRobotsHtml(status, version) {
+            if (status === 'bba') return `<span class="hb-bba">Blue Blaze ${version || ''}</span>`;
+            if (status === 'custom') return '<span class="hb-custom">Custom</span>';
+            if (status === 'none') return '<span class="hb-none">None</span>';
+            return '<span class="hb-unknown">—</span>';
+        }
+
+        function hbExpiryHtml(expiresAt) {
+            if (!expiresAt) return '<span class="hb-unknown">—</span>';
+            const days = Math.round((new Date(expiresAt) - new Date()) / 86400000);
+            const cls = days < 30 ? 'hb-expiry-danger' : days < 90 ? 'hb-expiry-warn' : 'hb-pass';
+            return `<span class="${cls}">${expiresAt} (${days}d)</span>`;
+        }
+
+        async function loadSdHeartbeat() {
+            if (!_sdSiteId) return;
+            const el = document.getElementById('sdHbContent');
+            const lastEl = document.getElementById('sdHbLastScan');
+            try {
+                const resp = await fetch(`/api/heartbeat/site/${_sdSiteId}/latest`);
+                const r = await resp.json();
+                if (!r || !r.checked_at) {
+                    el.innerHTML = '<div class="sd-section-empty">No scan data yet — click Rescan.</div>';
+                    lastEl.textContent = '';
+                    return;
+                }
+                const ts = new Date(r.checked_at);
+                lastEl.textContent = `Last: ${ts.toLocaleDateString()} ${ts.toLocaleTimeString()}`;
+
+                const dnsRecords = (() => { try { return JSON.parse(r.dns_json || '{}'); } catch { return {}; } })();
+                const rdapFlags = (() => { try { return JSON.parse(r.rdap_status_flags || '[]'); } catch { return []; } })();
+                const isLocked = rdapFlags.some(f => f.toLowerCase().includes('transfer'));
+
+                el.innerHTML = `
+                <div class="hb-grid">
+                    <div class="hb-item"><span class="hb-label">SPF:</span> ${hbStatusIcon(r.spf_status)}</div>
+                    <div class="hb-item"><span class="hb-label">DKIM:</span> ${hbStatusIcon(r.dkim_status)}${r.dkim_selector ? ` <span style="font-size:11px;color:var(--text-muted);">(${r.dkim_selector})</span>` : ''}</div>
+                    <div class="hb-item"><span class="hb-label">DMARC:</span> ${hbStatusIcon(r.dmarc_status)}</div>
+                    <div class="hb-item"><span class="hb-label">SMTP:</span> ${hbStatusIcon(r.smtp_status)}</div>
+                    <div class="hb-item"><span class="hb-label">robots.txt:</span> ${hbRobotsHtml(r.robots_status, r.robots_version)}</div>
+                    <div class="hb-item"><span class="hb-label">Sitemap:</span> ${hbStatusIcon(r.sitemap_status)}</div>
+                    <div class="hb-item"><span class="hb-label">WP API:</span> ${hbStatusIcon(r.wp_api_status)}</div>
+                    ${r.staging_status !== 'unknown' ? `<div class="hb-item"><span class="hb-label">Staging:</span> ${hbStatusIcon(r.staging_status)}</div>` : ''}
+                    ${r.staging_auth_status !== 'unknown' ? `<div class="hb-item"><span class="hb-label">Basic Auth:</span> ${hbStatusIcon(r.staging_auth_status)}</div>` : ''}
+                    ${r.rdap_registrar ? `<div class="hb-item"><span class="hb-label">Registrar:</span> <span>${escapeHtml(r.rdap_registrar)}</span></div>` : ''}
+                    ${r.rdap_expires_at ? `<div class="hb-item"><span class="hb-label">Expires:</span> ${hbExpiryHtml(r.rdap_expires_at)}</div>` : ''}
+                    ${r.rdap_expires_at ? `<div class="hb-item"><span class="hb-label">Locked:</span> ${isLocked ? '<span class="hb-pass">✓</span>' : '<span class="hb-fail">✗</span>'}</div>` : ''}
+                </div>
+                ${r.smtp_detail ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;">SMTP: ${escapeHtml(r.smtp_detail)}</div>` : ''}
+                <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+                    ${Object.keys(dnsRecords).length ? `<button class="hb-toggle-details" data-target="sdDnsDetails">Show DNS ▾</button>` : ''}
+                    ${r.rdap_registrar ? `<button class="hb-toggle-details" data-target="sdRdapDetails">Show WHOIS ▾</button>` : ''}
+                    ${r.robots_content ? `<button class="hb-toggle-details" data-target="sdRobotsDetails">Show robots.txt ▾</button>` : ''}
+                </div>
+                <div id="sdDnsDetails" class="hb-details-panel">${escapeHtml(JSON.stringify(dnsRecords, null, 2))}</div>
+                <div id="sdRdapDetails" class="hb-details-panel">${escapeHtml(JSON.stringify(rdapFlags, null, 2))}</div>
+                <div id="sdRobotsDetails" class="hb-details-panel">${escapeHtml(r.robots_content || '')}</div>`;
+
+                el.querySelectorAll('.hb-toggle-details').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const panel = document.getElementById(btn.dataset.target);
+                        if (!panel) return;
+                        const visible = panel.style.display === 'block';
+                        panel.style.display = visible ? 'none' : 'block';
+                        btn.textContent = btn.textContent.replace(visible ? '▴' : '▾', visible ? '▾' : '▴');
+                    });
+                });
+
+                const active = await fetch('/api/heartbeat/status').then(r=>r.json());
+                if (active.running) sdHbStartPolling();
+            } catch(e) {
+                el.innerHTML = `<div class="sd-section-empty">Error loading heartbeat data.</div>`;
+            }
+        }
+
+        async function loadSdRegression() {
+            if (!_sdSiteId) return;
+            const el = document.getElementById('sdRegressionContent');
+            try {
+                const rows = await fetch(`/api/regression/site/${_sdSiteId}/history`).then(r=>r.json());
+                if (!rows.length) { el.innerHTML = '<div class="sd-section-empty">No regression runs for this site yet.</div>'; return; }
+                el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead><tr style="text-align:left;">
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Date</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Page</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">HTTP</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Diff%</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Issues</th>
+                    </tr></thead>
+                    <tbody>${rows.slice(0, 20).map(r => {
+                        const d = new Date(r.run_started_at || r.checked_at);
+                        const hasDiff = r.diff_score != null;
+                        const issueColor = r.has_issues ? 'var(--red,#f87171)' : '#4ade80';
+                        return `<tr>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${d.toLocaleDateString()}</td>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${escapeHtml((r.page_url||r.site_url||'').replace(/^https?:\/\//,'').slice(0,40))}</td>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${r.http_status||'—'}</td>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${hasDiff ? r.diff_score.toFixed(1)+'%' : '—'}</td>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:${issueColor};">${r.has_issues ? 'Yes' : 'No'}</td>
+                        </tr>`;
+                    }).join('')}</tbody></table>`;
+            } catch { el.innerHTML = '<div class="sd-section-empty">Error loading regression history.</div>'; }
+        }
+
+        async function loadSdLinkCheck() {
+            if (!_sdSiteId) return;
+            const el = document.getElementById('sdLinkCheckContent');
+            try {
+                const rows = await fetch(`/api/linkcheck/site/${_sdSiteId}/history`).then(r=>r.json());
+                if (!rows.length) { el.innerHTML = '<div class="sd-section-empty">No link check runs for this site yet.</div>'; return; }
+                el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead><tr style="text-align:left;">
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Date</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Pages</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Links</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Broken</th>
+                    </tr></thead>
+                    <tbody>${rows.slice(0, 20).map(r => {
+                        const d = new Date(r.started_at);
+                        const brokenColor = r.broken_count > 0 ? 'var(--red,#f87171)' : '#4ade80';
+                        return `<tr>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${d.toLocaleDateString()}</td>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${r.pages_crawled}</td>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${r.links_checked}</td>
+                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:${brokenColor};font-weight:600;">${r.broken_count}</td>
+                        </tr>`;
+                    }).join('')}</tbody></table>`;
+            } catch { el.innerHTML = '<div class="sd-section-empty">Error loading link check history.</div>'; }
+        }
+
+        async function loadSdUpdates() {
+            if (!_sdSiteId) return;
+            const el = document.getElementById('sdUpdateContent');
+            try {
+                const resp = await fetch(`/api/mainwp/update-history/cached?site_id=${_sdSiteId}&limit=30`);
+                const rows = await resp.json();
+                const list = Array.isArray(rows) ? rows : (rows.data || []);
+                if (!list.length) { el.innerHTML = '<div class="sd-section-empty">No update history for this site.</div>'; return; }
+                el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead><tr style="text-align:left;">
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Date</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Type</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Name</th>
+                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Version</th>
+                    </tr></thead>
+                    <tbody>${list.slice(0, 30).map(r => `<tr>
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${(r.updated_date||'').slice(0,10)}</td>
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${escapeHtml(r.update_type||'')}</td>
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${escapeHtml(r.name||'')}</td>
+                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${escapeHtml((r.old_version||''))} → ${escapeHtml((r.new_version||''))}</td>
+                    </tr>`).join('')}</tbody></table>`;
+            } catch { el.innerHTML = '<div class="sd-section-empty">Error loading update history.</div>'; }
         }
 
         function renderPagesList(pages) {

@@ -41,6 +41,7 @@ from routes.sites import SitesMixin
 from routes.regression import RegressionMixin
 from routes.linkcheck import LinkCheckMixin
 from routes.onboarding import OnboardingMixin
+from routes.heartbeat import HeartbeatMixin
 
 from config import (
     load_config, config_exists,
@@ -56,7 +57,7 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 class DashboardHandler(
     AuthMixin, UptimeMixin, CloudflareMixin,
     MainWPMixin, SitesMixin, RegressionMixin, LinkCheckMixin,
-    OnboardingMixin,
+    OnboardingMixin, HeartbeatMixin,
     SimpleHTTPRequestHandler,
 ):
     """Serves static files and handles API proxy routes."""
@@ -155,6 +156,19 @@ class DashboardHandler(
             self._get_onboarding_fields()
         elif path == "/api/onboarding/data":
             self._get_onboarding_data()
+        elif path == "/api/heartbeat/status":
+            self._heartbeat_status()
+        elif path == "/api/heartbeat/runs":
+            self._heartbeat_runs()
+        elif path.startswith("/api/heartbeat/results/"):
+            run_id = path.split("/")[-1]
+            self._heartbeat_results(run_id)
+        elif path.startswith("/api/heartbeat/site/") and path.endswith("/latest"):
+            site_id = path.split("/")[-2]
+            self._heartbeat_site_latest(site_id)
+        elif path.startswith("/api/heartbeat/site/") and path.endswith("/history"):
+            site_id = path.split("/")[-2]
+            self._heartbeat_site_history(site_id)
         elif path == "/api/logs":
             with routes._logs_lock:
                 self._json_response(list(routes._logs))
@@ -190,6 +204,10 @@ class DashboardHandler(
             self._create_onboarding_field(body)
         elif path == "/api/onboarding/data":
             self._save_onboarding_cell(body)
+        elif path == "/api/heartbeat/run":
+            self._start_heartbeat_run(body)
+        elif path == "/api/heartbeat/cancel":
+            self._cancel_heartbeat_run()
         else:
             self._json_response({"error": "Not found"}, 404)
 

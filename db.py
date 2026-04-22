@@ -213,6 +213,54 @@ def init_db():
             updated_at TEXT NOT NULL,
             PRIMARY KEY (site_id, field_id)
         );
+
+        -- Heartbeat scan tables
+        CREATE TABLE IF NOT EXISTS heartbeat_runs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at  TEXT NOT NULL,
+            finished_at TEXT,
+            status      TEXT NOT NULL DEFAULT 'running',
+            total_sites INTEGER NOT NULL DEFAULT 0,
+            checked     INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS heartbeat_results (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id              INTEGER NOT NULL,
+            site_id             INTEGER NOT NULL,
+            site_url            TEXT NOT NULL,
+            checked_at          TEXT NOT NULL,
+            dns_json            TEXT,
+            spf_status          TEXT,
+            spf_record          TEXT,
+            dkim_status         TEXT,
+            dkim_selector       TEXT,
+            dmarc_status        TEXT,
+            dmarc_record        TEXT,
+            smtp_status         TEXT,
+            smtp_detail         TEXT,
+            robots_status       TEXT,
+            robots_version      TEXT,
+            robots_content      TEXT,
+            sitemap_status      TEXT,
+            sitemap_url         TEXT,
+            staging_status      TEXT,
+            staging_final_url   TEXT,
+            staging_auth_status TEXT,
+            wp_api_status       TEXT,
+            rdap_status         TEXT,
+            rdap_registrar      TEXT,
+            rdap_expires_at     TEXT,
+            rdap_created_at     TEXT,
+            rdap_status_flags   TEXT,
+            rdap_nameservers    TEXT,
+            rdap_json           TEXT,
+            error               TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_results_site
+            ON heartbeat_results(site_id, checked_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_results_run
+            ON heartbeat_results(run_id);
     """)
     conn.commit()
 
@@ -1056,6 +1104,16 @@ def save_onboarding_cell(site_id: int, field_id: str, value: str) -> None:
     conn.commit()
 
 
+def get_onboarding_cell(site_id: int, field_id: str) -> str:
+    """Return the value of a single onboarding cell, or '' if not set."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT value FROM onboarding_data WHERE site_id=? AND field_id=?",
+        (int(site_id), field_id)
+    ).fetchone()
+    return row["value"] if row else ""
+
+
 def get_link_check_results_for_run(run_id: int) -> list:
     """
     Return per-site summary + broken results for one run, with
@@ -1097,3 +1155,128 @@ def get_link_check_results_for_run(run_id: int) -> list:
         sd["broken_links"] = [dict(b) for b in broken]
         result.append(sd)
     return result
+
+
+# ─── Heartbeat Scans ─────────────────────────────────────────
+
+
+def create_heartbeat_run() -> int:
+    """Create a new heartbeat run record. Returns run_id."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO heartbeat_runs (started_at) VALUES (?)",
+        (datetime.now().isoformat(),)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def finish_heartbeat_run(run_id: int, total: int, status: str = "completed"):
+    """Mark a heartbeat run as finished."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE heartbeat_runs SET finished_at=?, status=?, total_sites=? WHERE id=?",
+        (datetime.now().isoformat(), status, total, run_id)
+    )
+    conn.commit()
+
+
+def save_heartbeat_result(run_id: int, result: dict):
+    """Save a single site's heartbeat result."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO heartbeat_results "
+        "(run_id, site_id, site_url, checked_at, dns_json, "
+        " spf_status, spf_record, dkim_status, dkim_selector, "
+        " dmarc_status, dmarc_record, smtp_status, smtp_detail, "
+        " robots_status, robots_version, robots_content, "
+        " sitemap_status, sitemap_url, staging_status, staging_final_url, "
+        " staging_auth_status, wp_api_status, "
+        " rdap_status, rdap_registrar, rdap_expires_at, rdap_created_at, "
+        " rdap_status_flags, rdap_nameservers, rdap_json, error) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            run_id,
+            result.get("site_id"),
+            result.get("site_url", ""),
+            datetime.now().isoformat(),
+            result.get("dns_json"),
+            result.get("spf_status"),
+            result.get("spf_record"),
+            result.get("dkim_status"),
+            result.get("dkim_selector"),
+            result.get("dmarc_status"),
+            result.get("dmarc_record"),
+            result.get("smtp_status"),
+            result.get("smtp_detail"),
+            result.get("robots_status"),
+            result.get("robots_version"),
+            result.get("robots_content"),
+            result.get("sitemap_status"),
+            result.get("sitemap_url"),
+            result.get("staging_status"),
+            result.get("staging_final_url"),
+            result.get("staging_auth_status"),
+            result.get("wp_api_status"),
+            result.get("rdap_status"),
+            result.get("rdap_registrar"),
+            result.get("rdap_expires_at"),
+            result.get("rdap_created_at"),
+            result.get("rdap_status_flags"),
+            result.get("rdap_nameservers"),
+            result.get("rdap_json"),
+            result.get("error"),
+        )
+    )
+    conn.execute(
+        "UPDATE heartbeat_runs SET checked = checked + 1 WHERE id = ?",
+        (run_id,)
+    )
+    conn.commit()
+
+
+def get_heartbeat_runs(limit: int = 50) -> list:
+    """Return recent heartbeat runs, newest first."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM heartbeat_runs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_heartbeat_results(run_id: int) -> list:
+    """Return all results for a heartbeat run."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM heartbeat_results WHERE run_id=? ORDER BY site_url",
+        (run_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_heartbeat_for_site(site_id) -> dict | None:
+    """Return the most recent heartbeat result for a site."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT hr.*, r.started_at AS run_started_at "
+        "FROM heartbeat_results hr "
+        "LEFT JOIN heartbeat_runs r ON r.id = hr.run_id "
+        "WHERE hr.site_id = ? "
+        "ORDER BY hr.id DESC LIMIT 1",
+        (int(site_id),)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_heartbeat_history_for_site(site_id) -> list:
+    """Return all heartbeat results for a site, newest first."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT hr.*, r.started_at AS run_started_at "
+        "FROM heartbeat_results hr "
+        "LEFT JOIN heartbeat_runs r ON r.id = hr.run_id "
+        "WHERE hr.site_id = ? "
+        "ORDER BY hr.id DESC",
+        (int(site_id),)
+    ).fetchall()
+    return [dict(r) for r in rows]
