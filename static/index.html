@@ -545,6 +545,64 @@
         }
         .lc-badge-internal { background: var(--accent-glow); color: var(--accent); }
         .lc-badge-external { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+
+        /* ── Onboarding Table ───────────────────────────────────── */
+        .ob-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+        .ob-toolbar .ob-spacer { flex: 1; }
+        .ob-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+        .ob-table { border-collapse: collapse; min-width: 100%; font-size: 13px; }
+        .ob-table th, .ob-table td { padding: 8px 12px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); white-space: nowrap; }
+        .ob-table th:last-child, .ob-table td:last-child { border-right: none; }
+        .ob-table tbody tr:last-child td { border-bottom: none; }
+        .ob-table thead tr:last-child th { border-bottom: 2px solid var(--border); }
+        .ob-group-header th { background: var(--surface-2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; text-align: center; padding: 5px 12px; cursor: pointer; }
+        .ob-group-header th:first-child, .ob-group-header th:nth-child(2) { background: var(--surface); }
+        .ob-col-header { background: var(--surface); font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; position: sticky; top: 0; z-index: 1; }
+        .ob-col-header.ob-sticky-col { background: var(--surface); z-index: 2; }
+        .ob-sticky-num { position: sticky; left: 0; background: var(--surface); z-index: 1; width: 36px; min-width: 36px; text-align: center; color: var(--text-muted); font-size: 12px; }
+        .ob-sticky-name { position: sticky; left: 36px; background: var(--surface); z-index: 1; font-weight: 500; min-width: 160px; }
+        .ob-table tbody tr:hover td { background: var(--surface-2); }
+        .ob-table tbody tr:hover .ob-sticky-num,
+        .ob-table tbody tr:hover .ob-sticky-name { background: var(--surface-2); }
+        .ob-cell { min-width: 120px; max-width: 200px; }
+        .ob-cell input[type="text"], .ob-cell input[type="url"] { width: 100%; background: transparent; border: none; outline: none; font: inherit; color: var(--text); padding: 0; }
+        .ob-cell input[type="text"]:focus, .ob-cell input[type="url"]:focus { background: var(--bg); border-radius: 4px; padding: 2px 4px; outline: 1px solid var(--accent); }
+        .ob-cell-bool { text-align: center; cursor: pointer; font-size: 16px; }
+        .ob-bool-on  { color: #4ade80; }
+        .ob-bool-off { color: var(--text-muted); opacity: 0.4; }
+        .ob-removed { opacity: 0.45; }
+        .ob-group-collapsed { display: none; }
+
+        /* Manage Fields modal */
+        .mf-field-list { max-height: 400px; overflow-y: auto; }
+        .mf-group { margin-bottom: 16px; }
+        .mf-group-header { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+        .mf-group-name { font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); flex: 1; }
+        .mf-group-hide-btn { font-size: 11px; padding: 2px 8px; }
+        .mf-field-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+        .mf-field-row:last-child { border-bottom: none; }
+        .mf-field-name { flex: 1; font-size: 13px; }
+        .mf-field-hidden { opacity: 0.4; }
+        .mf-btn-icon { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: 12px; cursor: pointer; color: var(--text-muted); }
+        .mf-btn-icon:hover { border-color: var(--accent); color: var(--accent); }
+        .mf-add-row { display: flex; gap: 8px; align-items: center; padding-top: 12px; flex-wrap: wrap; }
+        .mf-add-row input, .mf-add-row select { flex: 1; min-width: 80px; }
+
+        /* CF settings comparison */
+        .cf-sub-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+        .cf-sub-tab { padding: 5px 14px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); font-size: 12px; cursor: pointer; color: var(--text-muted); }
+        .cf-sub-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .cf-settings-wrap { overflow-x: auto; }
+        .cf-settings-table { border-collapse: collapse; font-size: 12px; }
+        .cf-settings-table th, .cf-settings-table td { padding: 7px 12px; border: 1px solid var(--border); white-space: nowrap; }
+        .cf-settings-table th { background: var(--surface-2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+        .cf-val-on    { color: #4ade80; font-weight: 600; }
+        .cf-val-off   { color: var(--yellow); }
+        .cf-val-full  { color: #4ade80; font-weight: 600; }
+        .cf-val-strict { color: #4ade80; font-weight: 600; }
+        .cf-val-flexible { color: var(--yellow); }
+        .cf-val-devmode  { color: var(--red, #f87171); font-weight: 600; }
+        .cf-val-outlier  { outline: 2px solid var(--yellow); border-radius: 3px; }
     </style>
 </head>
 <body>
@@ -558,6 +616,7 @@
         </div>
         <div class="header-right">
             <button class="btn header-nav-btn" id="sitesBtn">Sites</button>
+            <button class="btn header-nav-btn" id="onboardingBtn">Onboarding</button>
             <button class="btn header-nav-btn" id="settingsBtn">Settings</button>
             <div class="last-updated">
                 Last updated: <span id="lastUpdated">never</span>
@@ -603,8 +662,27 @@
 
         <!-- Cloudflare Tab -->
         <div id="cloudflare" class="tab-content">
-            <div class="stats-row" id="cfStatsRow"></div>
-            <div class="cf-grid" id="cfGrid"></div>
+            <div class="cf-sub-tabs">
+                <button class="cf-sub-tab active" data-cf-tab="analytics">Analytics</button>
+                <button class="cf-sub-tab" data-cf-tab="settings">Settings Comparison</button>
+            </div>
+            <!-- Analytics sub-tab -->
+            <div id="cfAnalyticsPane">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                    <label style="font-size:12px; color:var(--text-muted);">Time range:</label>
+                    <select id="cfRangeSelect" class="field-input" style="width:auto; font-size:12px;">
+                        <option value="24h">Last 24 hours</option>
+                        <option value="7d">Last 7 days</option>
+                        <option value="30d">Last 30 days</option>
+                    </select>
+                </div>
+                <div class="stats-row" id="cfStatsRow"></div>
+                <div class="cf-grid" id="cfGrid"></div>
+            </div>
+            <!-- Settings comparison sub-tab -->
+            <div id="cfSettingsPane" style="display:none;">
+                <div id="cfSettingsContent"><div class="empty-state"><h3>Loading…</h3></div></div>
+            </div>
         </div>
 
         <!-- MainWP Tab -->
@@ -1161,6 +1239,19 @@
                 </div>
             </div>
         </div>
+        <!-- Onboarding Tab -->
+        <div id="onboarding" class="tab-content">
+            <div class="ob-toolbar">
+                <span style="font-size:14px; font-weight:600;">Client Site Checklist</span>
+                <span class="ob-spacer"></span>
+                <button class="btn" id="obOptionsBtn">Options</button>
+                <button class="btn" id="obManageFieldsBtn">Manage Fields</button>
+            </div>
+            <div class="ob-wrap">
+                <div id="obTableContainer"><div class="empty-state"><h3>Loading…</h3></div></div>
+            </div>
+        </div>
+
         <!-- Settings Tab -->
         <div id="settings" class="tab-content">
             <div class="settings-grid">
@@ -1261,6 +1352,41 @@
         </div>
     </div>
 
+    <!-- Onboarding: Manage Fields Modal -->
+    <div id="obManageFieldsOverlay" class="modal-overlay" style="z-index:290;">
+        <div class="modal" style="max-width:520px; width:95vw; max-height:90vh; overflow-y:auto;">
+            <h2>Manage Fields</h2>
+            <div id="mfFieldList" class="mf-field-list"></div>
+            <div class="mf-add-row">
+                <input type="text" id="mfNewName" class="field-input" placeholder="Field name" style="flex:2; min-width:100px;">
+                <input type="text" id="mfNewGroup" class="field-input" placeholder="Group" list="mfGroupList" style="flex:1.5; min-width:80px;">
+                <datalist id="mfGroupList"></datalist>
+                <select id="mfNewType" class="field-input" style="flex:1; min-width:70px;">
+                    <option value="text">Text</option>
+                    <option value="url">URL</option>
+                    <option value="bool">Yes/No</option>
+                    <option value="select">Select</option>
+                </select>
+                <button class="btn btn-primary" id="mfAddBtn">Add</button>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" id="obManageFieldsCloseBtn">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Onboarding: Options Modal -->
+    <div id="obOptionsOverlay" class="modal-overlay" style="z-index:290;">
+        <div class="modal" style="max-width:420px; width:90vw; max-height:80vh; overflow-y:auto;">
+            <h2>Onboarding Options</h2>
+            <p>Uncheck sites to hide them from the checklist table. Other views are unaffected.</p>
+            <div id="obOptionsSiteList" style="max-height:360px; overflow-y:auto;"></div>
+            <div class="modal-actions">
+                <button class="btn" id="obOptionsCloseBtn">Done</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Passphrase Modal -->
     <div id="passphraseOverlay" class="modal-overlay">
         <div class="modal">
@@ -1353,8 +1479,12 @@
             return apiCall('/cloudflare/zones');
         }
 
-        async function getCloudflareAnalytics(zoneId) {
-            return apiCall(`/cloudflare/analytics/${zoneId}`);
+        async function getCloudflareAnalytics(zoneId, range = '24h') {
+            return apiCall(`/cloudflare/analytics/${zoneId}?range=${range}`);
+        }
+
+        async function getCloudflareZoneSettings(zoneId) {
+            return apiCall(`/cloudflare/zone-settings/${zoneId}`);
         }
 
         async function getMainWP() {
@@ -1493,6 +1623,7 @@
 
         document.getElementById('settingsBtn').addEventListener('click', () => switchTab('settings'));
         document.getElementById('sitesBtn').addEventListener('click', () => switchTab('sites'));
+        document.getElementById('onboardingBtn').addEventListener('click', () => switchTab('onboarding'));
 
         document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
             const btn = document.getElementById('saveSettingsBtn');
@@ -1662,6 +1793,7 @@
             // Deactivate header nav buttons
             document.getElementById('sitesBtn').classList.remove('active');
             document.getElementById('settingsBtn').classList.remove('active');
+            document.getElementById('onboardingBtn').classList.remove('active');
 
             // Activate the right button — either in tab bar or header nav
             const tabBarBtn = document.querySelector(`[data-tab="${tabName}"]`);
@@ -1671,6 +1803,8 @@
                 document.getElementById('sitesBtn').classList.add('active');
             } else if (tabName === 'settings') {
                 document.getElementById('settingsBtn').classList.add('active');
+            } else if (tabName === 'onboarding') {
+                document.getElementById('onboardingBtn').classList.add('active');
             }
 
             document.getElementById(tabName).classList.add('active');
@@ -1683,6 +1817,7 @@
             if (tabName === 'sites' && !_sitesList.length) loadSitesTab();
             if (tabName === 'settings') loadSettingsData();
             if (tabName === 'linkchecker') loadLinkChecker();
+            if (tabName === 'onboarding') loadOnboarding();
         }
 
         // ============================================================================
@@ -1717,9 +1852,7 @@
                     ? parseFloat(ur.custom_uptime_ratios['30d']).toFixed(2)
                     : 'N/A';
 
-            const cfThreats24h = appState.data.cloudflare?.result
-                ? appState.data.cloudflare.result.reduce((sum, zone) => sum + (zone.account_takeover || 0), 0)
-                : 0;
+            const cfZoneCount = appState.data.cloudflare?.result?.length ?? 0;
 
             const statsRow = document.getElementById('statsRow');
             statsRow.innerHTML = `
@@ -1744,8 +1877,8 @@
                     <div class="stat-value green">${avgUptime30d}%</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">CF Threats (24h)</div>
-                    <div class="stat-value yellow">${cfThreats24h}</div>
+                    <div class="stat-label">CF Zones</div>
+                    <div class="stat-value">${cfZoneCount}</div>
                 </div>
             `;
 
@@ -1887,55 +2020,68 @@
         // ============================================================================
         // Render: Cloudflare Tab
         // ============================================================================
+
+        // CF sub-tab switching
+        document.querySelectorAll('.cf-sub-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.cf-sub-tab').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const tab = btn.dataset.cfTab;
+                document.getElementById('cfAnalyticsPane').style.display = tab === 'analytics' ? '' : 'none';
+                document.getElementById('cfSettingsPane').style.display  = tab === 'settings'  ? '' : 'none';
+                if (tab === 'settings' && appState.data.cloudflare?.result) renderCfSettings();
+            });
+        });
+
+        document.getElementById('cfRangeSelect').addEventListener('change', () => renderCloudflare());
+
         async function renderCloudflare() {
             const cf = appState.data.cloudflare;
             if (!cf || !cf.result) {
                 document.getElementById('cfStatsRow').innerHTML = '';
-                document.getElementById('cfGrid').innerHTML = '<div class="empty-state"><h3>No zones</h3></div>';
+                document.getElementById('cfGrid').innerHTML = '<div class="empty-state"><h3>No zones — configure your Cloudflare API token in Settings.</h3></div>';
                 return;
             }
 
             const zones = cf.result || [];
+            const range = document.getElementById('cfRangeSelect').value;
+            const rangeLabel = { '24h': '24h', '7d': '7 days', '30d': '30 days' }[range] || range;
 
-            // Stats
-            const totalRequests = zones.reduce((sum, z) => sum + (z.requests?.all || 0), 0);
-            const totalThreats = zones.reduce((sum, z) => sum + ((z.threats?.all || 0) + (z.account_takeover || 0)), 0);
-            const totalBandwidth = zones.reduce((sum, z) => sum + (z.bandwidth?.all || 0), 0);
-
-            const cfStatsRow = document.getElementById('cfStatsRow');
-            cfStatsRow.innerHTML = `
-                <div class="stat-card">
-                    <div class="stat-label">Total Requests (24h)</div>
-                    <div class="stat-value">${totalRequests.toLocaleString()}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Total Threats</div>
-                    <div class="stat-value red">${totalThreats.toLocaleString()}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Total Bandwidth</div>
-                    <div class="stat-value">${(totalBandwidth / 1024 / 1024 / 1024).toFixed(2)} GB</div>
-                </div>
-            `;
-
-            // Per-zone cards
             const cfGrid = document.getElementById('cfGrid');
+            cfGrid.innerHTML = '<div style="padding:12px; color:var(--text-muted); font-size:13px;">Loading analytics…</div>';
+
+            // Fetch all zone analytics in parallel
+            const analyticsResults = await Promise.all(
+                zones.map(z => getCloudflareAnalytics(z.id, range).catch(() => null))
+            );
+
+            let totalRequests = 0, totalBandwidth = 0, totalThreats = 0;
             cfGrid.innerHTML = '';
 
-            for (const zone of zones) {
-                const analytics = await getCloudflareAnalytics(zone.account.id);
-                const requests = zone.requests?.all || 0;
-                const cacheRatio = zone.cache || 0;
-                const bandwidth = zone.bandwidth?.all || 0;
-                const threats = (zone.threats?.all || 0) + (zone.account_takeover || 0);
-                const ssl = zone.ssl || 'N/A';
+            zones.forEach((zone, i) => {
+                const a = analyticsResults[i];
+                const totals    = a?.result?.totals || {};
+                const requests  = totals.requests?.all  || 0;
+                const bandwidth = totals.bandwidth?.all || 0;
+                const threats   = totals.threats?.all   || 0;
+                const cached    = totals.requests?.cached || 0;
+                const cacheRatio = requests > 0 ? (cached / requests) : 0;
+                const uniques   = totals.uniques?.all   || 0;
+
+                totalRequests  += requests;
+                totalBandwidth += bandwidth;
+                totalThreats   += threats;
 
                 cfGrid.innerHTML += `
                     <div class="cf-card">
                         <h4>${zone.name}</h4>
                         <div class="cf-stat-row">
-                            <span class="label">Requests (24h)</span>
+                            <span class="label">Requests (${rangeLabel})</span>
                             <span>${requests.toLocaleString()}</span>
+                        </div>
+                        <div class="cf-stat-row">
+                            <span class="label">Unique Visitors</span>
+                            <span>${uniques.toLocaleString()}</span>
                         </div>
                         <div class="cf-stat-row">
                             <span class="label">Cache Ratio</span>
@@ -1943,19 +2089,121 @@
                         </div>
                         <div class="cf-stat-row">
                             <span class="label">Bandwidth</span>
-                            <span>${(bandwidth / 1024 / 1024 / 1024).toFixed(2)} GB</span>
+                            <span>${(bandwidth / 1024 / 1024).toFixed(1)} MB</span>
                         </div>
                         <div class="cf-stat-row">
                             <span class="label">Threats</span>
-                            <span>${threats.toLocaleString()}</span>
+                            <span${threats > 0 ? ' style="color:var(--red,#f87171)"' : ''}>${threats.toLocaleString()}</span>
                         </div>
                         <div class="cf-stat-row">
-                            <span class="label">SSL Status</span>
-                            <span>${ssl}</span>
+                            <span class="label">Plan</span>
+                            <span>${zone.plan?.name || 'N/A'}</span>
                         </div>
                     </div>
                 `;
+            });
+
+            document.getElementById('cfStatsRow').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Total Requests (${rangeLabel})</div>
+                    <div class="stat-value">${totalRequests.toLocaleString()}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Bandwidth</div>
+                    <div class="stat-value">${(totalBandwidth / 1024 / 1024).toFixed(1)} MB</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Threats</div>
+                    <div class="stat-value${totalThreats > 0 ? ' red' : ''}">${totalThreats.toLocaleString()}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Zones</div>
+                    <div class="stat-value">${zones.length}</div>
+                </div>
+            `;
+        }
+
+        // CF Settings Comparison
+        const CF_SETTINGS_KEYS = [
+            { id: 'ssl',                       label: 'SSL Mode' },
+            { id: 'security_level',            label: 'Security Level' },
+            { id: 'always_use_https',          label: 'Always HTTPS' },
+            { id: 'min_tls_version',           label: 'Min TLS' },
+            { id: 'tls_1_3',                   label: 'TLS 1.3' },
+            { id: 'automatic_https_rewrites',  label: 'Auto HTTPS Rewrites' },
+            { id: 'browser_check',             label: 'Browser Integrity' },
+            { id: 'brotli',                    label: 'Brotli' },
+            { id: 'http2',                     label: 'HTTP/2' },
+            { id: 'http3',                     label: 'HTTP/3' },
+            { id: '0rtt',                      label: '0-RTT' },
+            { id: 'email_obfuscation',         label: 'Email Obfuscation' },
+            { id: 'hotlink_protection',        label: 'Hotlink Protection' },
+            { id: 'rocket_loader',             label: 'Rocket Loader' },
+            { id: 'development_mode',          label: 'Dev Mode' },
+        ];
+
+        async function renderCfSettings() {
+            const zones = appState.data.cloudflare?.result || [];
+            const el = document.getElementById('cfSettingsContent');
+            el.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:13px;">Loading settings…</div>';
+
+            const settingsResults = await Promise.all(
+                zones.map(z => getCloudflareZoneSettings(z.id).catch(() => null))
+            );
+
+            const zoneSettings = settingsResults.map(r => {
+                const map = {};
+                for (const s of (r?.result || [])) map[s.id] = s.value;
+                return map;
+            });
+
+            function majority(vals) {
+                const freq = {};
+                for (const v of vals) freq[String(v)] = (freq[String(v)] || 0) + 1;
+                return Object.entries(freq).sort((a,b) => b[1]-a[1])[0]?.[0];
             }
+
+            function cfValClass(key, val) {
+                const s = String(val).toLowerCase();
+                if (key === 'development_mode' && s === 'on') return 'cf-val-devmode';
+                if (s === 'on' || s === 'full' || s === 'strict' || s === 'high') return 'cf-val-on';
+                if (s === 'flexible') return 'cf-val-flexible';
+                if (s === 'off') return 'cf-val-off';
+                return '';
+            }
+
+            const relevantKeys = CF_SETTINGS_KEYS.filter(k =>
+                zoneSettings.some(s => s[k.id] !== undefined)
+            );
+
+            if (!relevantKeys.length) {
+                el.innerHTML = '<div class="empty-state"><h3>No settings data</h3><p>Ensure your API token has Zone Settings Read permission.</p></div>';
+                return;
+            }
+
+            const thead = '<tr><th>Setting</th>' + zones.map(z => `<th>${z.name}</th>`).join('') + '</tr>';
+            let tbody = '';
+            for (const key of relevantKeys) {
+                const vals = zoneSettings.map(s => s[key.id] ?? '—');
+                const maj = majority(vals.filter(v => v !== '—'));
+                const cells = vals.map(v => {
+                    const cls = cfValClass(key.id, v);
+                    const outlier = v !== '—' && String(v) !== maj ? ' cf-val-outlier' : '';
+                    return `<td class="${cls}${outlier}">${v}</td>`;
+                }).join('');
+                tbody += `<tr><td><strong>${key.label}</strong></td>${cells}</tr>`;
+            }
+
+            el.innerHTML = `
+                <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+                    Yellow outline = value differs from the majority across zones.
+                </p>
+                <div class="cf-settings-wrap">
+                    <table class="cf-settings-table">
+                        <thead>${thead}</thead>
+                        <tbody>${tbody}</tbody>
+                    </table>
+                </div>`;
         }
 
         // ============================================================================
@@ -5407,6 +5655,334 @@
             }
         });
 
+        // ============================================================================
+        // Onboarding
+        // ============================================================================
+
+        let _obData = null; // { fields, sites, data }
+        let _obCollapsedGroups = new Set();
+
+        async function loadOnboarding() {
+            document.getElementById('obTableContainer').innerHTML =
+                '<div style="padding:16px;color:var(--text-muted);font-size:13px;">Loading…</div>';
+            try {
+                _obData = await apiCall('/onboarding/data');
+                renderOnboarding();
+            } catch(e) {
+                document.getElementById('obTableContainer').innerHTML =
+                    `<div class="empty-state"><h3>Error loading onboarding data</h3><p>${e.message}</p></div>`;
+            }
+        }
+
+        function renderOnboarding() {
+            if (!_obData) return;
+            const { fields, sites, data } = _obData;
+            const visibleFields = fields.filter(f => !f.hidden);
+
+            if (!sites.length) {
+                document.getElementById('obTableContainer').innerHTML =
+                    '<div class="empty-state"><h3>No sites</h3><p>Add sites via MainWP and sync.</p></div>';
+                return;
+            }
+
+            // Build group structure
+            const groups = [];
+            const groupMap = {};
+            for (const f of visibleFields) {
+                if (!groupMap[f.group_name]) {
+                    groupMap[f.group_name] = [];
+                    groups.push(f.group_name);
+                }
+                groupMap[f.group_name].push(f);
+            }
+
+            // Group header row (spans)
+            let groupHeaderCells = '<th class="ob-sticky-num ob-col-header"></th><th class="ob-sticky-name ob-col-header">Site</th>';
+            for (const g of groups) {
+                const cols = groupMap[g].length;
+                const collapsed = _obCollapsedGroups.has(g);
+                groupHeaderCells += `<th colspan="${collapsed ? 1 : cols}" data-group="${g}" title="Click to ${collapsed ? 'expand' : 'collapse'}">${g}${collapsed ? ' ▶' : ' ▼'}</th>`;
+            }
+
+            // Field label row
+            let fieldHeaderCells = '<th class="ob-sticky-num ob-col-header">#</th><th class="ob-sticky-name ob-col-header">Site</th>';
+            for (const g of groups) {
+                if (_obCollapsedGroups.has(g)) {
+                    fieldHeaderCells += `<th class="ob-col-header" style="color:var(--text-muted);font-size:10px;">…</th>`;
+                } else {
+                    for (const f of groupMap[g]) {
+                        fieldHeaderCells += `<th class="ob-col-header" title="${f.name}">${f.name}</th>`;
+                    }
+                }
+            }
+
+            // Body rows
+            let bodyRows = '';
+            sites.forEach((site, idx) => {
+                const sid = String(site.id);
+                const siteData = data[sid] || {};
+                const removedCls = site.is_removed ? ' ob-removed' : '';
+                let cells = `<td class="ob-sticky-num${removedCls}">${idx + 1}</td>`;
+                cells += `<td class="ob-sticky-name${removedCls}" title="${site.url || ''}">${site.name}</td>`;
+                for (const g of groups) {
+                    if (_obCollapsedGroups.has(g)) {
+                        cells += `<td style="background:var(--surface-2);"></td>`;
+                    } else {
+                        for (const f of groupMap[g]) {
+                            cells += obCellHtml(site, f, siteData[f.id] ?? f.default_value ?? '');
+                        }
+                    }
+                }
+                bodyRows += `<tr data-site-id="${sid}">${cells}</tr>`;
+            });
+
+            document.getElementById('obTableContainer').innerHTML = `
+                <table class="ob-table">
+                    <thead>
+                        <tr class="ob-group-header">${groupHeaderCells}</tr>
+                        <tr>${fieldHeaderCells}</tr>
+                    </thead>
+                    <tbody>${bodyRows}</tbody>
+                </table>`;
+
+            // Group collapse toggle
+            document.querySelectorAll('.ob-group-header th[data-group]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const g = th.dataset.group;
+                    if (_obCollapsedGroups.has(g)) _obCollapsedGroups.delete(g);
+                    else _obCollapsedGroups.add(g);
+                    renderOnboarding();
+                });
+            });
+
+            // Cell editing
+            document.querySelectorAll('#obTableContainer .ob-cell').forEach(td => {
+                const input = td.querySelector('input[type="text"], input[type="url"]');
+                if (!input) return;
+                input.addEventListener('blur', () => obSaveCell(td.dataset.siteId, td.dataset.fieldId, input.value));
+                input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+            });
+
+            document.querySelectorAll('#obTableContainer .ob-cell-bool').forEach(td => {
+                td.addEventListener('click', () => {
+                    const current = td.dataset.value === '1' ? '1' : '0';
+                    const next = current === '1' ? '0' : '1';
+                    td.dataset.value = next;
+                    td.innerHTML = next === '1'
+                        ? '<span class="ob-bool-on">✓</span>'
+                        : '<span class="ob-bool-off">✓</span>';
+                    obSaveCell(td.dataset.siteId, td.dataset.fieldId, next);
+                });
+            });
+        }
+
+        function obCellHtml(site, field, value) {
+            const sid = site.id;
+            const fid = field.id;
+            if (field.field_type === 'bool') {
+                const on = value === '1' || value === 'true' || value === 'yes';
+                return `<td class="ob-cell-bool" data-site-id="${sid}" data-field-id="${fid}" data-value="${on ? '1' : '0'}">
+                    <span class="${on ? 'ob-bool-on' : 'ob-bool-off'}">✓</span>
+                </td>`;
+            }
+            const type = field.field_type === 'url' ? 'url' : 'text';
+            const esc = String(value).replace(/"/g, '&quot;');
+            return `<td class="ob-cell" data-site-id="${sid}" data-field-id="${fid}">
+                <input type="${type}" value="${esc}" placeholder="—">
+            </td>`;
+        }
+
+        async function obSaveCell(siteId, fieldId, value) {
+            try {
+                await fetch('/api/onboarding/data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ site_id: parseInt(siteId), field_id: fieldId, value }),
+                });
+                if (_obData?.data) {
+                    if (!_obData.data[String(siteId)]) _obData.data[String(siteId)] = {};
+                    _obData.data[String(siteId)][fieldId] = value;
+                }
+            } catch(e) { console.warn('obSaveCell failed', e); }
+        }
+
+        // ── Manage Fields Modal ───────────────────────────────────────────────────
+
+        document.getElementById('obManageFieldsBtn').addEventListener('click', openManageFields);
+        document.getElementById('obManageFieldsCloseBtn').addEventListener('click', () => {
+            document.getElementById('obManageFieldsOverlay').classList.remove('visible');
+            loadOnboarding();
+        });
+        document.getElementById('obManageFieldsOverlay').addEventListener('click', e => {
+            if (e.target === e.currentTarget) {
+                document.getElementById('obManageFieldsOverlay').classList.remove('visible');
+                loadOnboarding();
+            }
+        });
+
+        async function openManageFields() {
+            document.getElementById('obManageFieldsOverlay').classList.add('visible');
+            await refreshManageFieldsList();
+        }
+
+        async function refreshManageFieldsList() {
+            const fields = await apiCall('/onboarding/fields').catch(() => []);
+            const groups = [];
+            const groupMap = {};
+            for (const f of fields) {
+                if (!groupMap[f.group_name]) { groupMap[f.group_name] = []; groups.push(f.group_name); }
+                groupMap[f.group_name].push(f);
+            }
+
+            // Populate group datalist
+            const dl = document.getElementById('mfGroupList');
+            dl.innerHTML = groups.map(g => `<option value="${g}">`).join('');
+
+            let html = '';
+            for (const g of groups) {
+                const allHidden = groupMap[g].every(f => f.hidden);
+                html += `<div class="mf-group">
+                    <div class="mf-group-header">
+                        <span class="mf-group-name">${g}</span>
+                        <button class="btn mf-group-hide-btn" data-group="${g}" data-hidden="${allHidden ? '1' : '0'}">${allHidden ? 'Show Group' : 'Hide Group'}</button>
+                    </div>
+                    <div>`;
+                for (const f of groupMap[g]) {
+                    html += `<div class="mf-field-row${f.hidden ? ' mf-field-hidden' : ''}" data-field-id="${f.id}">
+                        <span class="mf-field-name">${f.name}</span>
+                        <span style="font-size:11px;color:var(--text-muted);">${f.field_type}</span>
+                        <button class="mf-btn-icon mf-move-up" title="Move up">↑</button>
+                        <button class="mf-btn-icon mf-move-dn" title="Move down">↓</button>
+                        <button class="mf-btn-icon mf-hide-btn" title="${f.hidden ? 'Show' : 'Hide'}">${f.hidden ? '👁' : '🚫'}</button>
+                        <button class="mf-btn-icon mf-del-btn" title="Delete" style="color:var(--red,#f87171);">✕</button>
+                    </div>`;
+                }
+                html += '</div></div>';
+            }
+            document.getElementById('mfFieldList').innerHTML = html;
+
+            // Wire events
+            document.querySelectorAll('.mf-group-hide-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const g = btn.dataset.group;
+                    const hide = btn.dataset.hidden === '0';
+                    const gFields = fields.filter(f => f.group_name === g);
+                    await Promise.all(gFields.map(f =>
+                        fetch(`/api/onboarding/fields/${f.id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ hidden: hide }),
+                        })
+                    ));
+                    await refreshManageFieldsList();
+                });
+            });
+
+            document.querySelectorAll('.mf-hide-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const row = btn.closest('[data-field-id]');
+                    const fid = row.dataset.fieldId;
+                    const f = fields.find(x => x.id === fid);
+                    await fetch(`/api/onboarding/fields/${fid}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ hidden: !f.hidden }),
+                    });
+                    await refreshManageFieldsList();
+                });
+            });
+
+            document.querySelectorAll('.mf-del-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const row = btn.closest('[data-field-id]');
+                    const fid = row.dataset.fieldId;
+                    const f = fields.find(x => x.id === fid);
+                    if (!confirm(`Delete field "${f?.name}"? This removes all saved data for this field.`)) return;
+                    await fetch(`/api/onboarding/fields/${fid}`, { method: 'DELETE' });
+                    await refreshManageFieldsList();
+                });
+            });
+
+            // Move up/down: reorder by swapping positions
+            document.querySelectorAll('.mf-move-up, .mf-move-dn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const row = btn.closest('[data-field-id]');
+                    const fid = row.dataset.fieldId;
+                    const idx = fields.findIndex(f => f.id === fid);
+                    const isUp = btn.classList.contains('mf-move-up');
+                    const swapIdx = isUp ? idx - 1 : idx + 1;
+                    if (swapIdx < 0 || swapIdx >= fields.length) return;
+                    const posA = fields[idx].position;
+                    const posB = fields[swapIdx].position;
+                    await Promise.all([
+                        fetch(`/api/onboarding/fields/${fields[idx].id}`, {
+                            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ position: posB }),
+                        }),
+                        fetch(`/api/onboarding/fields/${fields[swapIdx].id}`, {
+                            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ position: posA }),
+                        }),
+                    ]);
+                    await refreshManageFieldsList();
+                });
+            });
+        }
+
+        document.getElementById('mfAddBtn').addEventListener('click', async () => {
+            const name = document.getElementById('mfNewName').value.trim();
+            const group = document.getElementById('mfNewGroup').value.trim() || 'General';
+            const type = document.getElementById('mfNewType').value;
+            if (!name) { document.getElementById('mfNewName').focus(); return; }
+            await fetch('/api/onboarding/fields', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, group_name: group, field_type: type }),
+            });
+            document.getElementById('mfNewName').value = '';
+            await refreshManageFieldsList();
+        });
+
+        // ── Options Modal (site visibility) ─────────────────────────────────────
+
+        document.getElementById('obOptionsBtn').addEventListener('click', openObOptions);
+        document.getElementById('obOptionsCloseBtn').addEventListener('click', () => {
+            document.getElementById('obOptionsOverlay').classList.remove('visible');
+            loadOnboarding();
+        });
+        document.getElementById('obOptionsOverlay').addEventListener('click', e => {
+            if (e.target === e.currentTarget) {
+                document.getElementById('obOptionsOverlay').classList.remove('visible');
+                loadOnboarding();
+            }
+        });
+
+        async function openObOptions() {
+            document.getElementById('obOptionsOverlay').classList.add('visible');
+            const sites = await apiCall('/sites').catch(() => []);
+            const list = document.getElementById('obOptionsSiteList');
+            list.innerHTML = sites.map(s => {
+                const hidden = s.hidden_from_onboarding ? 'checked' : '';
+                // checkbox checked = visible (hidden_from_onboarding = 0)
+                return `<label style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer;">
+                    <input type="checkbox" data-site-id="${s.id}" ${hidden ? '' : 'checked'} style="width:16px;height:16px;">
+                    <span style="font-size:13px;">${s.name}</span>
+                    ${s.url ? `<span style="font-size:11px;color:var(--text-muted);flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;">${s.url}</span>` : ''}
+                </label>`;
+            }).join('');
+
+            list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', async () => {
+                    const siteId = cb.dataset.siteId;
+                    const hidden = cb.checked ? 0 : 1;
+                    await fetch(`/api/sites/config/${siteId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ hidden_from_onboarding: hidden }),
+                    });
+                });
+            });
+        }
 
     </script>
 

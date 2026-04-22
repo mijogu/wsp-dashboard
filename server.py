@@ -40,6 +40,7 @@ from routes.mainwp import MainWPMixin
 from routes.sites import SitesMixin
 from routes.regression import RegressionMixin
 from routes.linkcheck import LinkCheckMixin
+from routes.onboarding import OnboardingMixin
 
 from config import (
     load_config, config_exists,
@@ -55,6 +56,7 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 class DashboardHandler(
     AuthMixin, UptimeMixin, CloudflareMixin,
     MainWPMixin, SitesMixin, RegressionMixin, LinkCheckMixin,
+    OnboardingMixin,
     SimpleHTTPRequestHandler,
 ):
     """Serves static files and handles API proxy routes."""
@@ -80,7 +82,11 @@ class DashboardHandler(
             self._proxy_cf_zones()
         elif path.startswith("/api/cloudflare/analytics/"):
             zone_id = path.split("/")[-1]
-            self._proxy_cf_analytics(zone_id)
+            range_param = parse_qs(parsed.query).get("range", ["24h"])[0]
+            self._proxy_cf_analytics(zone_id, range_param)
+        elif path.startswith("/api/cloudflare/zone-settings/"):
+            zone_id = path.split("/")[-1]
+            self._proxy_cf_zone_settings(zone_id)
         elif path == "/api/mainwp/sites":
             self._proxy_mainwp_sites()
         elif path == "/api/mainwp/updates":
@@ -145,6 +151,10 @@ class DashboardHandler(
         elif path.startswith("/api/linkcheck/results/"):
             run_id = path.split("/")[-1]
             self._get_link_check_results(run_id)
+        elif path == "/api/onboarding/fields":
+            self._get_onboarding_fields()
+        elif path == "/api/onboarding/data":
+            self._get_onboarding_data()
         elif path == "/api/logs":
             with routes._logs_lock:
                 self._json_response(list(routes._logs))
@@ -176,6 +186,21 @@ class DashboardHandler(
         elif path.startswith("/api/sites/config/"):
             site_id = path.split("/")[-1]
             self._save_site_config(site_id, body)
+        elif path == "/api/onboarding/fields":
+            self._create_onboarding_field(body)
+        elif path == "/api/onboarding/data":
+            self._save_onboarding_cell(body)
+        else:
+            self._json_response({"error": "Not found"}, 404)
+
+    def do_PATCH(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        body = self._read_body()
+
+        if path.startswith("/api/onboarding/fields/"):
+            fid = path.split("/")[-1]
+            self._update_onboarding_field(fid, body)
         else:
             self._json_response({"error": "Not found"}, 404)
 
@@ -186,6 +211,9 @@ class DashboardHandler(
         if path.startswith("/api/regression/run/"):
             run_id = path.split("/")[-1]
             self._delete_regression_run(run_id)
+        elif path.startswith("/api/onboarding/fields/"):
+            fid = path.split("/")[-1]
+            self._delete_onboarding_field(fid)
         else:
             self._json_response({"error": "Not found"}, 404)
 

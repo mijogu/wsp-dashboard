@@ -192,8 +192,31 @@ def init_db():
             set_at          TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (site_id, page_url)
         );
+
+        -- Onboarding: dynamic field definitions
+        CREATE TABLE IF NOT EXISTS onboarding_fields (
+            id            TEXT PRIMARY KEY,
+            name          TEXT NOT NULL,
+            group_name    TEXT NOT NULL DEFAULT 'General',
+            field_type    TEXT NOT NULL DEFAULT 'text',
+            options       TEXT NOT NULL DEFAULT '[]',
+            position      INTEGER NOT NULL DEFAULT 0,
+            hidden        INTEGER NOT NULL DEFAULT 0,
+            default_value TEXT NOT NULL DEFAULT ''
+        );
+
+        -- Onboarding: per-site cell values
+        CREATE TABLE IF NOT EXISTS onboarding_data (
+            site_id    INTEGER NOT NULL,
+            field_id   TEXT NOT NULL,
+            value      TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (site_id, field_id)
+        );
     """)
     conn.commit()
+
+    seed_onboarding_fields()
 
     # Migrations: add columns that may not exist in older DBs
     for migration in [
@@ -207,6 +230,8 @@ def init_db():
         "ALTER TABLE link_check_site_runs ADD COLUMN redirect_count INTEGER DEFAULT 0",
         "ALTER TABLE link_check_site_runs ADD COLUMN image_link_count INTEGER DEFAULT 0",
         "ALTER TABLE link_check_results ADD COLUMN is_image INTEGER DEFAULT 0",
+        # Onboarding
+        "ALTER TABLE site_config ADD COLUMN hidden_from_onboarding INTEGER NOT NULL DEFAULT 0",
     ]:
         try:
             conn.execute(migration)
@@ -599,24 +624,36 @@ def get_site_config(site_id) -> dict:
     if row:
         return dict(row)
     return {"site_id": str(site_id), "client_name": None, "notes": None,
-            "test_pages": "[]", "diff_threshold": 1.0, "updated_at": None}
+            "test_pages": "[]", "diff_threshold": 1.0,
+            "hidden_from_onboarding": 0, "updated_at": None}
 
 
 def save_site_config(site_id, client_name: str = None, notes: str = None,
-                     test_pages: str = "[]", diff_threshold: float = None) -> None:
+                     test_pages: str = "[]", diff_threshold: float = None,
+                     hidden_from_onboarding: int = None) -> None:
     """Insert or replace config for a site."""
     conn = _get_conn()
     threshold = diff_threshold if diff_threshold is not None else 1.0
+    # Read existing value for hidden_from_onboarding to avoid overwriting if not provided
+    if hidden_from_onboarding is None:
+        existing = conn.execute(
+            "SELECT hidden_from_onboarding FROM site_config WHERE site_id = ?",
+            (str(site_id),)
+        ).fetchone()
+        hidden_from_onboarding = existing["hidden_from_onboarding"] if existing else 0
     conn.execute(
-        "INSERT INTO site_config (site_id, client_name, notes, test_pages, diff_threshold, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, datetime('now')) "
+        "INSERT INTO site_config "
+        "(site_id, client_name, notes, test_pages, diff_threshold, hidden_from_onboarding, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime('now')) "
         "ON CONFLICT(site_id) DO UPDATE SET "
         "  client_name = excluded.client_name, "
         "  notes = excluded.notes, "
         "  test_pages = excluded.test_pages, "
         "  diff_threshold = excluded.diff_threshold, "
+        "  hidden_from_onboarding = excluded.hidden_from_onboarding, "
         "  updated_at = excluded.updated_at",
-        (str(site_id), client_name or None, notes or None, test_pages or "[]", threshold)
+        (str(site_id), client_name or None, notes or None, test_pages or "[]",
+         threshold, int(hidden_from_onboarding))
     )
     conn.commit()
 
@@ -903,6 +940,120 @@ def get_link_check_run_site_results(run_id: int, site_id: int) -> list:
         (run_id, site_id)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ─── Onboarding ──────────────────────────────────────────────
+
+
+_DEFAULT_ONBOARDING_FIELDS = [
+    ("hosting_provider",  "Hosting Provider",         "Infrastructure", "text",  0),
+    ("domain_registrar",  "Domain Registrar",         "Infrastructure", "text",  1),
+    ("dns_host",          "DNS Host",                 "Infrastructure", "text",  2),
+    ("email_host",        "Email Host",               "Infrastructure", "text",  3),
+    ("staging_url",       "Staging URL",              "Staging",        "url",   4),
+    ("staging_basic_auth","Basic Auth",               "Staging",        "bool",  5),
+    ("cloudflare_active", "Cloudflare Active",        "Security",       "bool",  6),
+    ("spf",               "SPF",                      "Security",       "bool",  7),
+    ("dkim",              "DKIM",                     "Security",       "bool",  8),
+    ("dmarc",             "DMARC",                    "Security",       "bool",  9),
+    ("two_fa",            "2FA Enabled",              "Security",       "bool",  10),
+    ("wordfence",         "Wordfence",                "Security",       "bool",  11),
+    ("cleantalk",         "CleanTalk",                "Security",       "bool",  12),
+    ("uptime_robot",      "Uptime Robot",             "Monitoring",     "bool",  13),
+    ("gsc_access",        "GSC Access",               "Monitoring",     "bool",  14),
+    ("ga_connected",      "GA Connected",             "Monitoring",     "bool",  15),
+    ("local_backups",     "Local Backups",            "Backups",        "bool",  16),
+    ("aws_backups",       "AWS Backups",              "Backups",        "bool",  17),
+    ("hosting_billing",   "Hosting Billing Contact",  "Billing",        "text",  18),
+    ("domain_billing",    "Domain Billing Contact",   "Billing",        "text",  19),
+]
+
+
+def seed_onboarding_fields() -> None:
+    """Insert default onboarding fields if they don't already exist."""
+    conn = _get_conn()
+    for fid, name, group, ftype, pos in _DEFAULT_ONBOARDING_FIELDS:
+        conn.execute(
+            "INSERT OR IGNORE INTO onboarding_fields "
+            "(id, name, group_name, field_type, position) VALUES (?, ?, ?, ?, ?)",
+            (fid, name, group, ftype, pos)
+        )
+    conn.commit()
+
+
+def get_onboarding_fields() -> list:
+    """Return all onboarding fields ordered by position."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM onboarding_fields ORDER BY position, id"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_onboarding_field(fid: str, name: str, group_name: str,
+                             field_type: str, options: str = "[]",
+                             default_value: str = "") -> None:
+    """Insert a new onboarding field at the end of its group."""
+    conn = _get_conn()
+    max_pos = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM onboarding_fields"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO onboarding_fields (id, name, group_name, field_type, options, default_value, position) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (fid, name, group_name, field_type, options, default_value, max_pos + 1)
+    )
+    conn.commit()
+
+
+def update_onboarding_field(fid: str, **kwargs) -> None:
+    """Update one or more columns on an onboarding field."""
+    allowed = {"name", "group_name", "field_type", "options", "hidden",
+               "position", "default_value"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+    if not updates:
+        return
+    conn = _get_conn()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    conn.execute(
+        f"UPDATE onboarding_fields SET {set_clause} WHERE id = ?",
+        list(updates.values()) + [fid]
+    )
+    conn.commit()
+
+
+def delete_onboarding_field(fid: str) -> None:
+    """Delete a field and all its cell data."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM onboarding_data WHERE field_id = ?", (fid,))
+    conn.execute("DELETE FROM onboarding_fields WHERE id = ?", (fid,))
+    conn.commit()
+
+
+def get_onboarding_data() -> dict:
+    """Return all onboarding cell values as {site_id_str: {field_id: value}}."""
+    conn = _get_conn()
+    rows = conn.execute("SELECT site_id, field_id, value FROM onboarding_data").fetchall()
+    result: dict = {}
+    for r in rows:
+        sid = str(r["site_id"])
+        if sid not in result:
+            result[sid] = {}
+        result[sid][r["field_id"]] = r["value"]
+    return result
+
+
+def save_onboarding_cell(site_id: int, field_id: str, value: str) -> None:
+    """Upsert a single onboarding cell."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO onboarding_data (site_id, field_id, value, updated_at) "
+        "VALUES (?, ?, ?, datetime('now')) "
+        "ON CONFLICT(site_id, field_id) DO UPDATE SET "
+        "  value = excluded.value, updated_at = excluded.updated_at",
+        (int(site_id), field_id, value)
+    )
+    conn.commit()
 
 
 def get_link_check_results_for_run(run_id: int) -> list:

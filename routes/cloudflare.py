@@ -36,7 +36,7 @@ class CloudflareMixin:
             add_log("Cloudflare", "error", f"Request failed: {e}")
             self._json_response({"error": str(e)}, 502)
 
-    def _proxy_cf_analytics(self, zone_id):
+    def _proxy_cf_analytics(self, zone_id, range_param: str = "24h"):
         s = get_settings()
         token = s.get("cfApiToken")
         if not token:
@@ -44,11 +44,29 @@ class CloudflareMixin:
             return
         try:
             from datetime import datetime, timedelta, timezone
-            since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            hours_map = {"24h": 24, "7d": 168, "30d": 720}
+            hours = hours_map.get(range_param, 24)
+            since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
             until = datetime.now(timezone.utc).isoformat()
             resp = http_requests.get(
                 f"https://api.cloudflare.com/client/v4/zones/{zone_id}/analytics/dashboard",
-                params={"since": since, "until": until},
+                params={"since": since, "until": until, "continuous": "true"},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30,
+            )
+            self._json_response(resp.json())
+        except Exception as e:
+            self._json_response({"error": str(e)}, 502)
+
+    def _proxy_cf_zone_settings(self, zone_id):
+        s = get_settings()
+        token = s.get("cfApiToken")
+        if not token:
+            self._json_response({"error": "No Cloudflare API token configured"}, 400)
+            return
+        try:
+            resp = http_requests.get(
+                f"https://api.cloudflare.com/client/v4/zones/{zone_id}/settings",
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=30,
             )

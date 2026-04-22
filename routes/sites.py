@@ -39,6 +39,7 @@ class SitesMixin:
                 "notes": cfg.get("notes"),
                 "test_pages": cfg.get("test_pages", "[]"),
                 "diff_threshold": cfg.get("diff_threshold", 1.0),
+                "hidden_from_onboarding": cfg.get("hidden_from_onboarding", 0),
                 "config_updated_at": cfg.get("updated_at"),
             }
             if use_registry:
@@ -80,22 +81,36 @@ class SitesMixin:
         self._json_response(get_site_config(site_id))
 
     def _save_site_config(self, site_id, body):
-        """Save config for a single site."""
-        client_name = body.get("client_name", "")
-        notes = body.get("notes", "")
-        test_pages = body.get("test_pages", [])
-        # Normalise: ensure it's a JSON string
-        if isinstance(test_pages, list):
-            test_pages_str = _json.dumps(test_pages)
+        """Save config for a single site. Only updates fields present in body."""
+        existing = get_site_config(site_id)
+
+        client_name = body.get("client_name", existing.get("client_name") or "")
+        notes = body.get("notes", existing.get("notes") or "")
+
+        if "test_pages" in body:
+            test_pages = body["test_pages"]
+            if isinstance(test_pages, list):
+                test_pages_str = _json.dumps(test_pages)
+            else:
+                test_pages_str = str(test_pages)
         else:
-            test_pages_str = str(test_pages)
-        # diff_threshold: accept float or numeric string; default 1.0
-        try:
-            diff_threshold = float(body.get("diff_threshold", 1.0))
-        except (TypeError, ValueError):
-            diff_threshold = 1.0
+            test_pages_str = existing.get("test_pages", "[]") or "[]"
+
+        if "diff_threshold" in body:
+            try:
+                diff_threshold = float(body["diff_threshold"])
+            except (TypeError, ValueError):
+                diff_threshold = 1.0
+        else:
+            diff_threshold = existing.get("diff_threshold", 1.0)
+
+        hidden_from_onboarding = None
+        if "hidden_from_onboarding" in body:
+            hidden_from_onboarding = int(bool(body["hidden_from_onboarding"]))
+
         save_site_config(site_id, client_name=client_name,
                          notes=notes, test_pages=test_pages_str,
-                         diff_threshold=diff_threshold)
+                         diff_threshold=diff_threshold,
+                         hidden_from_onboarding=hidden_from_onboarding)
         add_log("Sites", "ok", f"Config saved for site {site_id}")
         self._json_response({"ok": True})
