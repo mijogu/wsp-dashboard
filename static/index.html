@@ -4248,22 +4248,28 @@
 
             const rows = activeSites.map(site => {
                 const st = statusById[String(site.id)];
-                const hasRun  = !!st;
-                const total   = st ? (st.links_checked ?? 0) : null;
-                const broken  = st ? (st.broken_count  ?? 0) : null;
-                const working = (total !== null && broken !== null) ? (total - broken) : null;
+                const hasRun     = !!st;
+                const total      = st ? (st.links_checked  ?? 0) : null;
+                const broken     = st ? (st.broken_count   ?? 0) : null;
+                const working    = (total !== null && broken !== null) ? (total - broken) : null;
+                const prevBroken = st?.prev_broken_count  ?? null;
+                const prevLinks  = st?.prev_links_checked ?? null;
+                const prevWorking = (prevLinks !== null && prevBroken !== null) ? prevLinks - prevBroken : null;
 
-                const icon = !hasRun      ? `<span style="color:var(--text-muted);">—</span>`
-                    : broken > 0          ? `<span style="color:var(--red);">⚠</span>`
-                                          : `<span style="color:var(--green);">✓</span>`;
+                const icon = !hasRun ? `<span style="color:var(--text-muted);">—</span>`
+                    : broken > 0     ? `<span style="color:var(--red);">⚠</span>`
+                                     : `<span style="color:var(--green);">✓</span>`;
 
                 const fmt = n => n === null ? `<span style="color:var(--text-muted);">—</span>`
                                             : n.toLocaleString();
                 const brokenCell = broken === null ? fmt(null)
-                    : broken > 0 ? `<span style="color:var(--red); font-weight:600;">${broken.toLocaleString()}</span>`
-                                 : `<span style="color:var(--green);">0</span>`;
+                    : (broken > 0
+                        ? `<span style="color:var(--red); font-weight:600;">${broken.toLocaleString()}</span>`
+                        : `<span style="color:var(--green);">0</span>`)
+                      + lcDeltaBadge(broken, prevBroken, true);
                 const workingCell = working === null ? fmt(null)
-                    : `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`;
+                    : `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`
+                      + lcDeltaBadge(working, prevWorking, false);
 
                 let lastChecked = '—';
                 if (st?.run_started_at) {
@@ -4343,17 +4349,22 @@
                     const d = new Date((r.started_at || '') + 'Z');
                     const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                         + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-                    const total   = r.links_checked ?? 0;
-                    const broken  = r.broken_count  ?? 0;
-                    const working = total - broken;
+                    const total      = r.links_checked  ?? 0;
+                    const broken     = r.broken_count   ?? 0;
+                    const working    = total - broken;
+                    const prevBroken  = r.prev_broken_count  ?? null;
+                    const prevLinks   = r.prev_links_checked ?? null;
+                    const prevWorking = (prevLinks !== null && prevBroken !== null) ? prevLinks - prevBroken : null;
 
                     const icon = broken > 0
                         ? `<span style="color:var(--red);">⚠</span>`
                         : `<span style="color:var(--green);">✓</span>`;
-                    const brokenCell = broken > 0
+                    const brokenCell = (broken > 0
                         ? `<span style="color:var(--red); font-weight:600;">${broken}</span>`
-                        : `<span style="color:var(--green);">0</span>`;
-                    const workingCell = `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`;
+                        : `<span style="color:var(--green);">0</span>`)
+                        + lcDeltaBadge(broken, prevBroken, true);
+                    const workingCell = `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`
+                        + lcDeltaBadge(working, prevWorking, false);
                     const rowBg = broken > 0 ? 'background:var(--yellow-bg);' : '';
                     const expandId = `lc-hist-expand-${idx}`;
 
@@ -4464,6 +4475,24 @@
             }
         }
 
+        // ── Delta badge helper ────────────────────────────────────────────────────
+        /**
+         * Returns a small inline badge like "ꜛ4" or "ꜜ3" showing the change
+         * from prev to current.
+         * lowerIsBetter: true for Broken (a drop is green), false for Working.
+         * Returns '' when there's no previous data or no change.
+         */
+        function lcDeltaBadge(current, prev, lowerIsBetter) {
+            if (prev === null || prev === undefined) return '';
+            const delta = current - prev;
+            if (delta === 0) return '';
+            const up   = delta > 0;
+            const good = lowerIsBetter ? !up : up;
+            const color = good ? 'var(--green)' : 'var(--red)';
+            const arrow = up ? 'ꜛ' : 'ꜜ';
+            return `<span style="font-size:10px; color:${color}; margin-left:4px; font-weight:700; letter-spacing:0;">${arrow}${Math.abs(delta).toLocaleString()}</span>`;
+        }
+
         // ── Shared helper: render a list of broken link rows ─────────────────────
         function lcBrokenLinksHtml(links, colspan) {
             if (!links.length) {
@@ -4533,20 +4562,25 @@
 
             let html = '';
             sites.forEach((site, idx) => {
-                const total   = site.links_checked ?? 0;
-                const broken  = site.broken_count  ?? 0;
-                const working = total - broken;
-                const hasBroken = broken > 0;
-                const key = String(site.site_id ?? site.site_name ?? idx);
+                const total      = site.links_checked  ?? 0;
+                const broken     = site.broken_count   ?? 0;
+                const working    = total - broken;
+                const prevBroken  = site.prev_broken_count  ?? null;
+                const prevLinks   = site.prev_links_checked ?? null;
+                const prevWorking = (prevLinks !== null && prevBroken !== null) ? prevLinks - prevBroken : null;
+                const hasBroken  = broken > 0;
+                const key        = String(site.site_id ?? site.site_name ?? idx);
                 const isExpanded = _lcExpandedSites.has(key);
-                const domain = (site.site_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+                const domain     = (site.site_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
                 const rowBg = hasBroken ? 'background:var(--yellow-bg);' : '';
                 const icon  = hasBroken ? `<span style="color:var(--red);">⚠</span>`
                                         : `<span style="color:var(--green);">✓</span>`;
-                const brokenCell  = hasBroken
+                const brokenCell  = (hasBroken
                     ? `<span style="color:var(--red); font-weight:600;">${broken}</span>`
-                    : `<span style="color:var(--green);">0</span>`;
-                const workingCell = `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`;
+                    : `<span style="color:var(--green);">0</span>`)
+                    + lcDeltaBadge(broken, prevBroken, true);
+                const workingCell = `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`
+                    + lcDeltaBadge(working, prevWorking, false);
                 const expandArrow = hasBroken
                     ? `<span style="font-size:11px; color:var(--text-muted); margin-left:4px;">${isExpanded ? '▲' : '▼'}</span>`
                     : '';

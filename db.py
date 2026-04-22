@@ -811,10 +811,9 @@ def save_link_check_site_run(run_id: int, site_id, site_name: str,
 
 def get_link_check_site_status() -> list:
     """
-    Return per-site summary from the most recent completed run.
-    Uses link_check_site_runs so every checked site appears, even those
-    with 0 broken links. Each row includes pages_crawled, links_checked,
-    broken_count, run_id, run_started_at.
+    Return per-site summary from the most recent completed run, plus
+    prev_broken_count / prev_links_checked from the immediately preceding
+    completed run for that site (for delta badges in the UI).
     """
     conn = _get_conn()
     latest = conn.execute(
@@ -825,10 +824,25 @@ def get_link_check_site_status() -> list:
         return []
     run_id, run_started_at = latest["id"], latest["started_at"]
     rows = conn.execute(
-        "SELECT site_id, site_name, site_url, "
-        "       pages_crawled, links_checked, broken_count "
-        "FROM link_check_site_runs WHERE run_id=? "
-        "ORDER BY broken_count DESC, site_name",
+        """
+        SELECT sr.site_id, sr.site_name, sr.site_url,
+               sr.pages_crawled, sr.links_checked, sr.broken_count,
+               prev.links_checked AS prev_links_checked,
+               prev.broken_count  AS prev_broken_count
+        FROM link_check_site_runs sr
+        LEFT JOIN link_check_site_runs prev
+               ON prev.site_id = sr.site_id
+              AND prev.run_id = (
+                  SELECT MAX(sr2.run_id)
+                  FROM link_check_site_runs sr2
+                  JOIN link_check_runs r2 ON r2.id = sr2.run_id
+                  WHERE sr2.site_id = sr.site_id
+                    AND sr2.run_id < sr.run_id
+                    AND r2.status = 'completed'
+              )
+        WHERE sr.run_id = ?
+        ORDER BY sr.broken_count DESC, sr.site_name
+        """,
         (run_id,)
     ).fetchall()
     result = [dict(r) for r in rows]
@@ -840,19 +854,25 @@ def get_link_check_site_status() -> list:
 
 def get_link_check_site_history(site_id: int) -> list:
     """
-    Return per-run summary for one site, newest first.
-    Uses link_check_site_runs so every run that checked this site appears,
-    including runs where the site had 0 broken links.
+    Return per-run summary for one site, newest first, with prev_broken_count
+    and prev_links_checked from the immediately preceding run for delta badges.
     """
     conn = _get_conn()
     rows = conn.execute(
         """
-        SELECT sr.run_id, r.started_at, r.finished_at, r.status,
-               sr.pages_crawled, sr.links_checked, sr.broken_count
-        FROM link_check_site_runs sr
-        JOIN link_check_runs r ON r.id = sr.run_id
-        WHERE sr.site_id = ? AND r.status = 'completed'
-        ORDER BY sr.run_id DESC
+        SELECT run_id, started_at, finished_at, status,
+               pages_crawled, links_checked, broken_count,
+               prev_links_checked, prev_broken_count
+        FROM (
+            SELECT sr.run_id, r.started_at, r.finished_at, r.status,
+                   sr.pages_crawled, sr.links_checked, sr.broken_count,
+                   LAG(sr.links_checked) OVER (ORDER BY sr.run_id ASC) AS prev_links_checked,
+                   LAG(sr.broken_count)  OVER (ORDER BY sr.run_id ASC) AS prev_broken_count
+            FROM link_check_site_runs sr
+            JOIN link_check_runs r ON r.id = sr.run_id
+            WHERE sr.site_id = ? AND r.status = 'completed'
+        )
+        ORDER BY run_id DESC
         """,
         (site_id,)
     ).fetchall()
@@ -873,13 +893,31 @@ def get_link_check_run_site_results(run_id: int, site_id: int) -> list:
 
 def get_link_check_results_for_run(run_id: int) -> list:
     """
-    Return per-site summary + broken results for one run.
-    Returns list of site dicts, each with 'broken_links' list attached.
+    Return per-site summary + broken results for one run, with
+    prev_broken_count / prev_links_checked from the preceding completed
+    run for each site (for delta badges in the UI).
     """
     conn = _get_conn()
     sites = conn.execute(
-        "SELECT * FROM link_check_site_runs WHERE run_id=? "
-        "ORDER BY broken_count DESC, site_name",
+        """
+        SELECT sr.id, sr.run_id, sr.site_id, sr.site_name, sr.site_url,
+               sr.pages_crawled, sr.links_checked, sr.broken_count,
+               prev.links_checked AS prev_links_checked,
+               prev.broken_count  AS prev_broken_count
+        FROM link_check_site_runs sr
+        LEFT JOIN link_check_site_runs prev
+               ON prev.site_id = sr.site_id
+              AND prev.run_id = (
+                  SELECT MAX(sr2.run_id)
+                  FROM link_check_site_runs sr2
+                  JOIN link_check_runs r2 ON r2.id = sr2.run_id
+                  WHERE sr2.site_id = sr.site_id
+                    AND sr2.run_id < sr.run_id
+                    AND r2.status = 'completed'
+              )
+        WHERE sr.run_id = ?
+        ORDER BY sr.broken_count DESC, sr.site_name
+        """,
         (run_id,)
     ).fetchall()
     result = []
