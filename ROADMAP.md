@@ -6,7 +6,7 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 
 ---
 
-## Current State (as of 2026-03-27)
+## Current State (as of 2026-04-22)
 
 **Shipped:**
 - Core proxy infrastructure (MainWP, Uptime Robot, Cloudflare)
@@ -16,12 +16,19 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 - Regression Layer 2: Visual diff (Pillow pixel diff, baseline management)
 - Per-site configuration (diff threshold, test pages, notes)
 - Cancel + delete regression runs
-
-**Pending UX fix (carry into Phase 0):** Replace per-run dropdown with a site-centric persistent table as the default regression view.
+- Site-centric regression default view with sortable columns, Options/Restore/Set Default
+- Broken Link Checker (Phase 1) with site-status + per-run history views, sortable tables, scope toggles, run options with Restore/Set Default
+- Heartbeat scans with per-site history
+- Site Dashboards — per-site summary view (heartbeat, regression, link check, update history)
+- Cloudflare settings comparison table (transposed, sortable across zones)
+- Onboarding screen — collapsible field groups, inline editing, sticky columns
+- `server.py` split into route modules under `routes/` (~12 KB thin dispatcher)
+- `CLAUDE.md` project context file
+- Hash-based URL routing — refresh-persistent deep links for all tabs, sub-views, and record IDs
 
 ---
 
-## Phase 0 — Documentation, Refactor & UX Cleanup
+## Phase 0 — Documentation, Refactor & UX Cleanup ✓ (mostly done)
 
 **Goal:** Get the codebase and docs in order before adding any new features.
 
@@ -30,43 +37,38 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 **Tasks:**
 
 *Documentation:*
-- [ ] Create `CLAUDE.md` — project context for Claude Code sessions (conventions, architecture, test patterns)
+- [x] Create `CLAUDE.md` — project context for Claude Code sessions
 - [ ] Update `RUNBOOK.md` — Layer 2 visual diff, per-site config, new API endpoints, correct test count (6 files, not 2)
 - [ ] Add Pillow troubleshooting note to RUNBOOK (visual diff not showing → `pip install Pillow`)
 
 *Refactor:*
-- [ ] Split `server.py` (currently 52KB / 1000+ lines) into route modules
-  - `server.py` becomes a thin entry point and router
-  - Each logical area (settings, mainwp, regression, cloudflare, uptime) lives in its own module
-  - Keep `http.server` + `ThreadingMixIn` — no framework migration needed
-  - All existing tests must pass after refactor
+- [x] Split `server.py` into route modules under `routes/` — now a ~12 KB thin dispatcher
+- [x] Hash-based URL routing — `#/{tab}/{subview}/{id}` deep links, refresh-persistent, per-tab last-used sub-view via `wsp_last_subview` localStorage key
 
 *UX fix:*
-- [ ] Replace per-run dropdown with a site-centric persistent table as the default regression view
-  - Persistent table: all sites + their latest result + diff score
-  - Run dropdown becomes a secondary "historical view" mode
+- [x] Replace per-run dropdown with a site-centric persistent table as the default regression view
 
 **Done criteria:** CLAUDE.md and updated RUNBOOK exist; `server.py` is split into modules with all tests passing; regression default view is site-centric.
+
+**Remaining:** RUNBOOK update.
 
 **Dependencies:** None — do this first.
 
 ---
 
-## Phase 1 — Layer 3: Broken Link Checker
+## Phase 1 — Layer 3: Broken Link Checker ✓ Done
 
 **Goal:** Detect broken links (4xx/5xx) across each site's pages as part of the regression run.
 
 **Complexity:** M
 
-**Tasks:**
-- [ ] After Playwright screenshot, extract all `<a href>` links on the page
-- [ ] Issue HEAD (fallback GET) requests in parallel; log status codes
-- [ ] New `broken_links` DB table: `(result_id, url, status_code, checked_at)`
-- [ ] UI: "Broken Links" count column in results table
-- [ ] UI: click count to expand per-site link list with status codes
-- [ ] Scope decision at build time: homepage-only links vs. depth-2 crawl (start with homepage-only)
-
-**Done criteria:** Regression run reports broken link count per site; results stored in DB; UI shows counts with drill-down detail.
+**Shipped:**
+- [x] Standalone link-checker runs (independent of regression)
+- [x] Broken links stored in DB with status codes
+- [x] Site-status and per-run views with sortable tables
+- [x] Per-site history panel
+- [x] Scope toggles (internal / external links), run options with Restore/Set Default
+- [x] Delta badges showing change from prior run
 
 **Dependencies:** Phase 0 (server refactor makes integration cleaner).
 
@@ -210,13 +212,13 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 
 ## Phase Summary
 
-| Phase | What it delivers | Complexity | Blocked by |
-|-------|-----------------|------------|-----------|
-| 0 | Docs, refactor, UX fix | M | — |
-| 1 | Broken link checker | M | Phase 0 |
-| 2 | Client tagging + filtered views | M | — |
-| 3 | URL snapshot + change tracking | M | Phase 0 |
-| 4 | Alerting + notifications | S | Phase 1 |
-| 5 | Always-on + Tailscale + scheduling | M | Hardware (Ubuntu machine) |
-| 6 | Form testing + Mailpit | XL | Phase 2, WSP plugin work |
-| 7 | Client-facing views | L | Phase 2, Phase 5 |
+| Phase | What it delivers | Complexity | Status |
+|-------|-----------------|------------|--------|
+| 0 | Docs, refactor, UX fix, URL routing | M | ✓ Mostly done (RUNBOOK pending) |
+| 1 | Broken link checker | M | ✓ Done |
+| 2 | Client tagging + filtered views | M | Not started |
+| 3 | URL snapshot + change tracking | M | Not started |
+| 4 | Alerting + notifications | S | Blocked by Phase 1 ✓ |
+| 5 | Always-on + Tailscale + scheduling | M | Blocked by hardware |
+| 6 | Form testing + Mailpit | XL | Blocked by Phase 2, WSP plugin |
+| 7 | Client-facing views | L | Blocked by Phase 2, Phase 5 |
