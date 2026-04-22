@@ -1595,8 +1595,10 @@
                     loadCachedHistory(true);
                     checkRegressionAvailability();
                     loadRegressionSiteList();
-                    if (_regViewMode === 'sites') loadSiteStatus();
-                    else loadRegressionResults();
+                    if (!location.hash || location.hash === '#' || location.hash === '#/') {
+                        history.replaceState(null, '', '#/overview');
+                    }
+                    applyRouteFromHash();
                     return;
                 }
 
@@ -1655,8 +1657,10 @@
                     loadCachedHistory(true);
                     checkRegressionAvailability();
                     loadRegressionSiteList();
-                    if (_regViewMode === 'sites') loadSiteStatus();
-                    else loadRegressionResults();
+                    if (!location.hash || location.hash === '#' || location.hash === '#/') {
+                        history.replaceState(null, '', '#/overview');
+                    }
+                    applyRouteFromHash();
                 }
             } catch (error) {
                 document.getElementById('passphraseError').textContent = 'Error unlocking dashboard';
@@ -1690,9 +1694,9 @@
             }
         }
 
-        document.getElementById('settingsBtn').addEventListener('click', () => switchTab('settings'));
-        document.getElementById('sitesBtn').addEventListener('click', () => switchTab('sites'));
-        document.getElementById('onboardingBtn').addEventListener('click', () => switchTab('onboarding'));
+        document.getElementById('settingsBtn').addEventListener('click', () => navigate({ tab: 'settings' }));
+        document.getElementById('sitesBtn').addEventListener('click', () => navigate({ tab: 'sites' }));
+        document.getElementById('onboardingBtn').addEventListener('click', () => navigate({ tab: 'onboarding' }));
 
         document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
             const btn = document.getElementById('saveSettingsBtn');
@@ -1845,26 +1849,143 @@
         }, 60000);
 
         // ============================================================================
+        // Router — hash-based URL routing
+        // URL scheme: #/{tab}  |  #/{tab}/{subview}  |  #/{tab}/{subview}/{id}
+        // ============================================================================
+        const _SUBVIEW_TABS = ['cloudflare', 'regression', 'linkchecker'];
+        const _SUBVIEW_DEFAULTS = { cloudflare: 'analytics', regression: 'sites', linkchecker: 'sites' };
+        let _pendingSiteRoute = null; // {subview, id} — set when routing to sites before list loads
+
+        function _getLastSubview(tab) {
+            try { return JSON.parse(localStorage.getItem('wsp_last_subview') || '{}')[tab] || null; }
+            catch { return null; }
+        }
+        function _saveLastSubview(tab, subview) {
+            try {
+                const s = JSON.parse(localStorage.getItem('wsp_last_subview') || '{}');
+                s[tab] = subview;
+                localStorage.setItem('wsp_last_subview', JSON.stringify(s));
+            } catch {}
+        }
+
+        function parseHash() {
+            const raw = location.hash.replace(/^#\/?/, '') || 'overview';
+            const parts = raw.split('/');
+            return { tab: parts[0] || 'overview', subview: parts[1] || null, id: parts[2] || null };
+        }
+        function buildHash({ tab, subview, id } = {}) {
+            let h = '#/' + (tab || 'overview');
+            if (subview) h += '/' + subview;
+            if (id != null) h += '/' + id;
+            return h;
+        }
+
+        function navigate({ tab, subview, id } = {}) {
+            const hash = buildHash({ tab: tab || 'overview', subview, id });
+            if (location.hash === hash) {
+                _applyRoute(parseHash());
+            } else {
+                location.hash = hash; // triggers hashchange → _applyRoute
+            }
+        }
+
+        function applyRouteFromHash() { _applyRoute(parseHash()); }
+
+        function _applyRoute({ tab, subview, id }) {
+            if (!appState.unlocked) return;
+            // Expand bare sub-view tabs to last-used or default
+            if (!subview && _SUBVIEW_TABS.includes(tab)) {
+                subview = _getLastSubview(tab) || _SUBVIEW_DEFAULTS[tab];
+                history.replaceState(null, '', buildHash({ tab, subview }));
+            }
+            switchTab(tab);
+            switch (tab) {
+                case 'cloudflare':  _setCfSubview(subview); break;
+                case 'regression':  _applyRegSubview(subview, id); break;
+                case 'linkchecker': _applyLcSubview(subview, id); break;
+                case 'sites':       _applySitesRoute(subview, id); break;
+                case 'history':     loadDbStats(); if (!historyData.length) loadCachedHistory(true); break;
+                case 'settings':    loadSettingsData(); break;
+                case 'onboarding':  loadOnboarding(); break;
+                // overview, uptime, downtime, mainwp: data already loaded by loadAllData
+            }
+        }
+
+        // CF sub-view — activates the right sub-tab button and pane
+        function _setCfSubview(subview) {
+            const t = subview || 'analytics';
+            document.querySelectorAll('.cf-sub-tab').forEach(b =>
+                b.classList.toggle('active', b.dataset.cfTab === t));
+            document.getElementById('cfAnalyticsPane').style.display = t === 'analytics' ? '' : 'none';
+            document.getElementById('cfSettingsPane').style.display  = t === 'settings'  ? '' : 'none';
+            if (t === 'settings' && appState.data.cloudflare?.result) renderCfSettings();
+        }
+
+        // Regression sub-view
+        function _applyRegSubview(subview, id) {
+            const mode = subview === 'runs' ? 'runs' : 'sites';
+            setRegView(mode, id || null);
+        }
+
+        // Link Checker sub-view
+        function _applyLcSubview(subview, id) {
+            const mode = subview === 'runs' ? 'runs' : 'sites';
+            _lcViewMode = mode;
+            if (id) _lcSelectedRunId = String(id);
+            document.getElementById('lcViewSites').className = mode === 'sites' ? 'btn btn-primary' : 'btn';
+            document.getElementById('lcViewRuns').className  = mode === 'runs'  ? 'btn btn-primary' : 'btn';
+            document.getElementById('lcRunSelect').style.display = mode === 'runs' ? '' : 'none';
+            loadLinkChecker(); // reads _lcViewMode and _lcSelectedRunId
+        }
+
+        // Sites sub-view
+        function _applySitesRoute(subview, id) {
+            if (!subview || subview === 'list') {
+                clearTimeout(_sdHbPollTimer);
+                _sdSiteId = null;
+                document.getElementById('siteDashboard').style.display = 'none';
+                document.getElementById('siteDetail').style.display = 'none';
+                document.getElementById('sitesListView').style.display = '';
+                if (!_sitesList.length) loadSitesTab();
+            } else if ((subview === 'dashboard' || subview === 'detail') && id) {
+                if (_sitesList.length) {
+                    if (subview === 'dashboard') openSiteDashboard(id);
+                    else openSiteDetail(id);
+                } else {
+                    _pendingSiteRoute = { subview, id };
+                    document.getElementById('siteDashboard').style.display = 'none';
+                    document.getElementById('siteDetail').style.display = 'none';
+                    document.getElementById('sitesListView').style.display = '';
+                    loadSitesTab(); // will apply _pendingSiteRoute after loading
+                }
+            } else {
+                // Fallback — show list
+                document.getElementById('siteDashboard').style.display = 'none';
+                document.getElementById('siteDetail').style.display = 'none';
+                document.getElementById('sitesListView').style.display = '';
+                if (!_sitesList.length) loadSitesTab();
+            }
+        }
+
+        window.addEventListener('hashchange', applyRouteFromHash);
+
+        // ============================================================================
         // Tab Navigation
         // ============================================================================
         document.querySelectorAll('.tab').forEach((tab) => {
             tab.addEventListener('click', () => {
-                const tabName = tab.dataset.tab;
-                switchTab(tabName);
+                navigate({ tab: tab.dataset.tab });
             });
         });
 
+        // Pure DOM tab switcher — data loading is handled by _applyRoute
         function switchTab(tabName) {
-            // Deactivate all tab-bar buttons and tab content
             document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
-
-            // Deactivate header nav buttons
             document.getElementById('sitesBtn').classList.remove('active');
             document.getElementById('settingsBtn').classList.remove('active');
             document.getElementById('onboardingBtn').classList.remove('active');
 
-            // Activate the right button — either in tab bar or header nav
             const tabBarBtn = document.querySelector(`[data-tab="${tabName}"]`);
             if (tabBarBtn) {
                 tabBarBtn.classList.add('active');
@@ -1877,24 +1998,7 @@
             }
 
             document.getElementById(tabName).classList.add('active');
-
             appState.currentTab = tabName;
-            if (tabName === 'history') {
-                loadDbStats();
-                if (!historyData.length) loadCachedHistory(true);
-            }
-            if (tabName === 'sites') {
-                // Return to list view if dashboard or detail was open
-                document.getElementById('siteDashboard').style.display = 'none';
-                document.getElementById('siteDetail').style.display = 'none';
-                document.getElementById('sitesListView').style.display = '';
-                clearTimeout(_sdHbPollTimer);
-                _sdSiteId = null;
-                if (!_sitesList.length) loadSitesTab();
-            }
-            if (tabName === 'settings') loadSettingsData();
-            if (tabName === 'linkchecker') loadLinkChecker();
-            if (tabName === 'onboarding') loadOnboarding();
         }
 
         // ============================================================================
@@ -2101,12 +2205,10 @@
         // CF sub-tab switching
         document.querySelectorAll('.cf-sub-tab').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.cf-sub-tab').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
                 const tab = btn.dataset.cfTab;
-                document.getElementById('cfAnalyticsPane').style.display = tab === 'analytics' ? '' : 'none';
-                document.getElementById('cfSettingsPane').style.display  = tab === 'settings'  ? '' : 'none';
-                if (tab === 'settings' && appState.data.cloudflare?.result) renderCfSettings();
+                history.replaceState(null, '', buildHash({ tab: 'cloudflare', subview: tab }));
+                _saveLastSubview('cloudflare', tab);
+                _setCfSubview(tab);
             });
         });
 
@@ -3144,7 +3246,7 @@
         let _regressionPollTimer = null;
         let _regViewMode = 'sites'; // 'sites' or 'runs'
 
-        function setRegView(mode) {
+        function setRegView(mode, runId) {
             _regViewMode = mode;
             document.getElementById('regViewSites').className = mode === 'sites' ? 'btn btn-primary' : 'btn';
             document.getElementById('regViewRuns').className = mode === 'runs' ? 'btn btn-primary' : 'btn';
@@ -3154,6 +3256,8 @@
             document.getElementById('regressionRunInfo').textContent = '';
             if (mode === 'sites') {
                 loadSiteStatus();
+            } else if (runId) {
+                loadRegressionResults(runId); // also calls loadRegressionRuns internally
             } else {
                 loadRegressionRuns();
                 loadRegressionResults();
@@ -3789,6 +3893,7 @@
 
         // ── Run selector change handler ──────────────────────────────────────────
         document.getElementById('regressionRunSelect').addEventListener('change', e => {
+            history.replaceState(null, '', buildHash({ tab: 'regression', subview: 'runs', id: e.target.value }));
             loadRegressionResults(e.target.value);
         });
 
@@ -4298,8 +4403,16 @@
         });
 
         // Wire view toggle buttons
-        document.getElementById('regViewSites').addEventListener('click', () => setRegView('sites'));
-        document.getElementById('regViewRuns').addEventListener('click', () => setRegView('runs'));
+        document.getElementById('regViewSites').addEventListener('click', () => {
+            history.replaceState(null, '', buildHash({ tab: 'regression', subview: 'sites' }));
+            _saveLastSubview('regression', 'sites');
+            setRegView('sites');
+        });
+        document.getElementById('regViewRuns').addEventListener('click', () => {
+            history.replaceState(null, '', buildHash({ tab: 'regression', subview: 'runs' }));
+            _saveLastSubview('regression', 'runs');
+            setRegView('runs');
+        });
 
         // Wire the Run, Cancel, and Delete buttons
         document.getElementById('regressionRunBtn').addEventListener('click', startRegressionRun);
@@ -4423,6 +4536,13 @@
                     table.style.display = '';
                     renderSitesTable();
                 }
+                // Apply any sub-view route that was deferred until sites loaded
+                if (_pendingSiteRoute) {
+                    const { subview, id } = _pendingSiteRoute;
+                    _pendingSiteRoute = null;
+                    if (subview === 'dashboard' && id) openSiteDashboard(id);
+                    else if (subview === 'detail' && id) openSiteDetail(id);
+                }
             } catch (e) {
                 status.textContent = `Error loading sites: ${e.message}`;
             }
@@ -4512,6 +4632,8 @@
             const site = _sitesList.find(s => String(s.id) === String(siteId));
             if (!site) return;
             _siteDetailId = siteId;
+            history.replaceState(null, '', buildHash({ tab: 'sites', subview: 'detail', id: siteId }));
+            _saveLastSubview('sites', 'detail');
 
             document.getElementById('siteDetailName').textContent = site.name;
             document.getElementById('siteDetailUrl').textContent = site.url || '';
@@ -4547,6 +4669,7 @@
         }
 
         function closeSiteDetail() {
+            history.replaceState(null, '', buildHash({ tab: 'sites' }));
             document.getElementById('siteDetail').style.display = 'none';
             document.getElementById('sitesListView').style.display = '';
             _siteDetailId = null;
@@ -4560,6 +4683,8 @@
             const site = _sitesList.find(s => String(s.id) === String(siteId));
             if (!site) return;
             _sdSiteId = String(siteId);
+            history.replaceState(null, '', buildHash({ tab: 'sites', subview: 'dashboard', id: siteId }));
+            _saveLastSubview('sites', 'dashboard');
 
             document.getElementById('sdName').textContent = site.name;
             const metaParts = [site.url || ''];
@@ -4590,6 +4715,7 @@
         function closeSiteDashboard() {
             _sdSiteId = null;
             clearTimeout(_sdHbPollTimer);
+            history.replaceState(null, '', buildHash({ tab: 'sites' }));
             document.getElementById('siteDashboard').style.display = 'none';
             document.getElementById('sitesListView').style.display = '';
         }
@@ -4958,8 +5084,16 @@
             }
         }
 
-        document.getElementById('lcViewSites').addEventListener('click', () => setLcView('sites'));
-        document.getElementById('lcViewRuns').addEventListener('click', () => setLcView('runs'));
+        document.getElementById('lcViewSites').addEventListener('click', () => {
+            history.replaceState(null, '', buildHash({ tab: 'linkchecker', subview: 'sites' }));
+            _saveLastSubview('linkchecker', 'sites');
+            setLcView('sites');
+        });
+        document.getElementById('lcViewRuns').addEventListener('click', () => {
+            history.replaceState(null, '', buildHash({ tab: 'linkchecker', subview: 'runs' }));
+            _saveLastSubview('linkchecker', 'runs');
+            setLcView('runs');
+        });
 
         // ── Entry point ───────────────────────────────────────────────────────────
         async function loadLinkChecker() {
@@ -5346,6 +5480,7 @@
         }
 
         document.getElementById('lcRunSelect').addEventListener('change', e => {
+            history.replaceState(null, '', buildHash({ tab: 'linkchecker', subview: 'runs', id: e.target.value }));
             loadLcRunResults(e.target.value);
         });
 
