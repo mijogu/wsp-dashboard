@@ -614,6 +614,21 @@
         .sd-card   { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
         .sd-card-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
         .sd-card-title .sd-card-actions { margin-left: auto; display: flex; gap: 6px; }
+        /* ── Edit Toggle Switch (reusable) ─────────────────────── */
+        .edit-toggle-wrap { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+        .edit-toggle-wrap .edit-toggle-label { font-size: 11px; color: var(--text-muted); }
+        .edit-toggle { position: relative; display: inline-block; width: 30px; height: 16px; flex-shrink: 0; }
+        .edit-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .edit-toggle-slider { position: absolute; inset: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; transition: background .15s, border-color .15s; cursor: pointer; }
+        .edit-toggle-slider::before { content: ''; position: absolute; width: 10px; height: 10px; left: 2px; top: 2px; background: var(--text-muted); border-radius: 50%; transition: transform .15s, background .15s; }
+        .edit-toggle input:checked + .edit-toggle-slider { background: var(--accent); border-color: var(--accent); }
+        .edit-toggle input:checked + .edit-toggle-slider::before { transform: translateX(14px); background: #fff; }
+        /* Locked state: suppress interactivity on editable elements */
+        .ob-locked .ob-cell input { pointer-events: none; }
+        .ob-locked .ob-cell-bool { pointer-events: none; cursor: default; }
+        .sd-ob-locked .sd-ob-input { pointer-events: none; }
+        .sd-ob-locked .sd-ob-input:hover { background: transparent; padding: 0; }
+        .sd-ob-locked .sd-ob-bool { pointer-events: none; cursor: default; }
         /* ── Site Dashboard — Onboarding grid ──────────────────── */
         .sd-ob-grid { display: flex; flex-wrap: wrap; gap: 20px 32px; }
         .sd-ob-group { flex: 1 1 220px; }
@@ -1185,6 +1200,13 @@
                         Onboarding
                         <div class="sd-card-actions">
                             <button class="sd-ob-show-hidden-toggle" id="sdObShowHiddenBtn" title="Toggle hidden fields">Show Hidden</button>
+                            <label class="edit-toggle-wrap" title="Enable editing" style="margin-left:4px;">
+                                <span class="edit-toggle-label">Edit</span>
+                                <label class="edit-toggle">
+                                    <input type="checkbox" id="sdObEditCheck">
+                                    <span class="edit-toggle-slider"></span>
+                                </label>
+                            </label>
                         </div>
                     </div>
                     <div id="sdObContent"><div class="sd-section-empty">Loading…</div></div>
@@ -1302,6 +1324,13 @@
             <div class="ob-toolbar">
                 <span style="font-size:14px; font-weight:600;">Client Site Checklist</span>
                 <span class="ob-spacer"></span>
+                <label class="edit-toggle-wrap" title="Enable editing">
+                    <span class="edit-toggle-label">Edit</span>
+                    <label class="edit-toggle">
+                        <input type="checkbox" id="obEditCheck">
+                        <span class="edit-toggle-slider"></span>
+                    </label>
+                </label>
                 <button class="btn" id="obOptionsBtn">Options</button>
                 <button class="btn" id="obManageFieldsBtn">Manage Fields</button>
             </div>
@@ -4817,10 +4846,12 @@
             document.getElementById('sdUpdateContent').innerHTML =
                 '<div class="sd-section-empty">Loading…</div>';
 
-            // Reset show-hidden toggle
+            // Reset show-hidden and edit toggles
             document.getElementById('sdObContent').classList.remove('sd-ob-show-hidden');
             document.getElementById('sdObShowHiddenBtn').classList.remove('active');
             document.getElementById('sdObShowHiddenBtn').textContent = 'Show Hidden';
+            document.getElementById('sdObEditCheck').checked = false;
+            document.getElementById('sdObContent').classList.add('sd-ob-locked');
 
             await Promise.all([
                 loadSdOnboarding(),
@@ -6459,6 +6490,11 @@
                     <tbody>${bodyRows}</tbody>
                 </table>`;
 
+            // Apply locked state (editing off by default; survives re-renders)
+            if (!document.getElementById('obEditCheck').checked) {
+                document.getElementById('obTableContainer').classList.add('ob-locked');
+            }
+
             // Group collapse toggle
             document.querySelectorAll('.ob-group-header th[data-group]').forEach(th => {
                 th.addEventListener('click', () => {
@@ -6802,6 +6838,14 @@
             const showing = content.classList.toggle('sd-ob-show-hidden');
             btn.classList.toggle('active', showing);
             btn.textContent = showing ? 'Hide Hidden' : 'Show Hidden';
+        });
+
+        document.getElementById('sdObEditCheck').addEventListener('change', e => {
+            document.getElementById('sdObContent').classList.toggle('sd-ob-locked', !e.target.checked);
+        });
+
+        document.getElementById('obEditCheck').addEventListener('change', e => {
+            document.getElementById('obTableContainer').classList.toggle('ob-locked', !e.target.checked);
         });
 
     </script>
