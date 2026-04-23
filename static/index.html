@@ -614,6 +614,25 @@
         .sd-card   { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
         .sd-card-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
         .sd-card-title .sd-card-actions { margin-left: auto; display: flex; gap: 6px; }
+        /* ── Site Dashboard — Onboarding grid ──────────────────── */
+        .sd-ob-grid { display: flex; flex-wrap: wrap; gap: 20px 32px; }
+        .sd-ob-group { flex: 1 1 220px; }
+        .sd-ob-group-name { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+        .sd-ob-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; min-height: 30px; }
+        .sd-ob-label { font-size: 12px; color: var(--text-muted); flex: 0 0 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sd-ob-value { flex: 1; font-size: 13px; min-width: 0; }
+        .sd-ob-input { background: transparent; border: none; outline: none; font: inherit; color: var(--text); width: 100%; }
+        .sd-ob-input:hover { background: var(--surface-2); border-radius: 3px; padding: 1px 4px; }
+        .sd-ob-input:focus { background: var(--bg); border-radius: 4px; padding: 1px 4px; outline: 1px solid var(--accent); }
+        .sd-ob-bool { cursor: pointer; font-size: 16px; line-height: 1; }
+        .sd-ob-hidden { display: none; }
+        .sd-ob-show-hidden .sd-ob-hidden { display: flex; }
+        .sd-ob-show-hidden .sd-ob-group.sd-ob-hidden { display: block; }
+        .sd-ob-hidden-label { color: var(--text-muted); opacity: 0.5; font-style: italic; }
+        .sd-ob-show-hidden-toggle { font-size: 11px; color: var(--text-muted); cursor: pointer; background: none; border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; }
+        .sd-ob-show-hidden-toggle.active { color: var(--accent); border-color: var(--accent); }
+        .sd-ob-select { background: transparent; border: none; outline: none; font: inherit; color: var(--text); width: 100%; cursor: pointer; }
+        .sd-ob-select:focus { background: var(--bg); border-radius: 4px; outline: 1px solid var(--accent); }
         .hb-grid { display: flex; flex-wrap: wrap; gap: 8px 20px; }
         .hb-item { display: flex; align-items: center; gap: 5px; font-size: 13px; }
         .hb-label { color: var(--text-muted); }
@@ -977,7 +996,7 @@
             </div>
 
             <!-- Site selector modal -->
-            <div id="siteSelectOverlay" class="modal-overlay" style="z-index:240;">
+            <div id="siteSelectOverlay" class="modal-overlay" data-modal-closeable style="z-index:240;">
                 <div class="modal" style="max-width:480px; width:90vw; padding:0;">
                     <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border);">
                         <h3 style="font-size:14px; font-weight:600;">Regression Options</h3>
@@ -1085,7 +1104,7 @@
             </div>
 
             <!-- Link Check Options modal -->
-            <div id="lcSiteSelectOverlay" class="modal-overlay" style="z-index:240;">
+            <div id="lcSiteSelectOverlay" class="modal-overlay" data-modal-closeable style="z-index:240;">
                 <div class="modal" style="max-width:480px; width:90vw; padding:0;">
                     <!-- Header -->
                     <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border);">
@@ -1157,7 +1176,18 @@
                         <div class="sd-meta" id="sdMeta"></div>
                     </div>
                     <div class="sd-spacer"></div>
-                    <button class="btn" id="sdEditBtn">Edit Site</button>
+                    <button class="btn" id="sdEditBtn">Config</button>
+                </div>
+
+                <!-- Onboarding card -->
+                <div class="sd-card">
+                    <div class="sd-card-title">
+                        Onboarding
+                        <div class="sd-card-actions">
+                            <button class="sd-ob-show-hidden-toggle" id="sdObShowHiddenBtn" title="Toggle hidden fields">Show Hidden</button>
+                        </div>
+                    </div>
+                    <div id="sdObContent"><div class="sd-section-empty">Loading…</div></div>
                 </div>
 
                 <!-- Heartbeat card -->
@@ -1381,7 +1411,7 @@
     </div>
 
     <!-- Onboarding: Manage Fields Modal -->
-    <div id="obManageFieldsOverlay" class="modal-overlay" style="z-index:290;">
+    <div id="obManageFieldsOverlay" class="modal-overlay" data-modal-closeable style="z-index:290;">
         <div class="modal" style="max-width:520px; width:95vw; max-height:90vh; overflow-y:auto;">
             <h2>Manage Fields</h2>
             <div id="mfFieldList" class="mf-field-list"></div>
@@ -1404,7 +1434,7 @@
     </div>
 
     <!-- Onboarding: Options Modal -->
-    <div id="obOptionsOverlay" class="modal-overlay" style="z-index:290;">
+    <div id="obOptionsOverlay" class="modal-overlay" data-modal-closeable style="z-index:290;">
         <div class="modal" style="max-width:420px; width:90vw; max-height:80vh; overflow-y:auto;">
             <h2>Onboarding Options</h2>
             <p>Uncheck sites to hide them from the checklist table. Other views are unaffected.</p>
@@ -1435,7 +1465,7 @@
     </div>
 
     <!-- Screenshot modal — global, outside all tab-content divs so position:fixed works from any tab -->
-    <div id="screenshotOverlay" class="modal-overlay" style="z-index:250; align-items:flex-start; overflow:hidden; padding:40px 0;">
+    <div id="screenshotOverlay" class="modal-overlay" data-modal-closeable style="z-index:250; align-items:flex-start; overflow:hidden; padding:40px 0;">
         <div class="modal" style="max-width:900px; width:90vw; padding:0; margin:0 auto; display:flex; flex-direction:column; max-height:calc(100vh - 80px); overflow:hidden;">
             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--surface); border-radius:10px 10px 0 0; flex-shrink:0;">
                 <h3 id="screenshotTitle" style="font-size:14px; font-weight:600;">Screenshot</h3>
@@ -1448,7 +1478,7 @@
     </div>
 
     <!-- Visual diff comparison viewer — global, outside all tab-content divs so position:fixed works from any tab -->
-    <div id="diffOverlay" class="modal-overlay" style="z-index:260; align-items:flex-start; overflow:hidden; padding:30px 0;">
+    <div id="diffOverlay" class="modal-overlay" data-modal-closeable style="z-index:260; align-items:flex-start; overflow:hidden; padding:30px 0;">
         <div class="modal" style="max-width:1200px; width:95vw; padding:0; margin:0 auto; display:flex; flex-direction:column; max-height:calc(100vh - 60px); overflow:hidden;">
             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--surface); border-radius:10px 10px 0 0; border-bottom:1px solid var(--border); flex-shrink:0;">
                 <div>
@@ -1477,6 +1507,26 @@
     </div>
 
     <script>
+        // ============================================================================
+        // Modal Stack — ESC key support for all closeable modals
+        // ============================================================================
+        const _modalStack = [];
+
+        function modalPush(id, closeFn) {
+            modalRemove(id);
+            _modalStack.push({ id, fn: closeFn });
+        }
+        function modalRemove(id) {
+            const idx = _modalStack.findIndex(m => m.id === id);
+            if (idx !== -1) _modalStack.splice(idx, 1);
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape' || !_modalStack.length) return;
+            e.preventDefault();
+            _modalStack[_modalStack.length - 1].fn();
+        });
+
         // ============================================================================
         // State & Configuration
         // ============================================================================
@@ -3522,6 +3572,7 @@
                     document.getElementById('screenshotImg').src = link.dataset.src;
                     document.getElementById('screenshotTitle').textContent = link.dataset.site;
                     document.getElementById('screenshotOverlay').style.display = 'flex';
+                    modalPush('screenshotOverlay', closeScreenshotOverlay);
                 });
             });
 
@@ -3552,6 +3603,7 @@
                     document.getElementById('diffDiffImg').src = diffPath ? `/api/regression/screenshot/${diffPath}` : '';
                     document.getElementById('diffCurrentImg').src = currentPath ? `/api/regression/screenshot/${currentPath}` : '';
                     document.getElementById('diffOverlay').style.display = 'flex';
+                    modalPush('diffOverlay', closeDiffOverlay);
                 });
             });
 
@@ -3689,6 +3741,7 @@
                     document.getElementById('screenshotImg').src = link.dataset.src;
                     document.getElementById('screenshotTitle').textContent = link.dataset.site;
                     document.getElementById('screenshotOverlay').style.display = 'flex';
+                    modalPush('screenshotOverlay', closeScreenshotOverlay);
                 });
             });
 
@@ -3717,6 +3770,7 @@
                     document.getElementById('diffDiffImg').src = diffPath ? `/api/regression/screenshot/${diffPath}` : '';
                     document.getElementById('diffCurrentImg').src = currentPath ? `/api/regression/screenshot/${currentPath}` : '';
                     document.getElementById('diffOverlay').style.display = 'flex';
+                    modalPush('diffOverlay', closeDiffOverlay);
                 });
             });
         }
@@ -4192,6 +4246,7 @@
                     document.getElementById('screenshotImg').src = link.dataset.src;
                     document.getElementById('screenshotTitle').textContent = link.dataset.site;
                     document.getElementById('screenshotOverlay').style.display = 'flex';
+                    modalPush('screenshotOverlay', closeScreenshotOverlay);
                 });
             });
 
@@ -4220,6 +4275,7 @@
                         : '';
 
                     document.getElementById('diffOverlay').style.display = 'flex';
+                    modalPush('diffOverlay', closeDiffOverlay);
                 });
             });
         }
@@ -4230,13 +4286,22 @@
             try { return JSON.parse(str); } catch { return fallback; }
         }
 
+        // Close screenshot overlay
+        function closeScreenshotOverlay() {
+            document.getElementById('screenshotOverlay').style.display = 'none';
+            document.getElementById('screenshotImg').src = '';
+            modalRemove('screenshotOverlay');
+        }
+
         // Close diff overlay
-        document.getElementById('diffCloseBtn').addEventListener('click', () => {
+        function closeDiffOverlay() {
             document.getElementById('diffOverlay').style.display = 'none';
-        });
+            modalRemove('diffOverlay');
+        }
+
+        document.getElementById('diffCloseBtn').addEventListener('click', closeDiffOverlay);
         document.getElementById('diffOverlay').addEventListener('click', e => {
-            if (e.target === document.getElementById('diffOverlay'))
-                document.getElementById('diffOverlay').style.display = 'none';
+            if (e.target === document.getElementById('diffOverlay')) closeDiffOverlay();
         });
 
         // ── Site selector state ───────────────────────────────────────────────────
@@ -4346,6 +4411,7 @@
         document.getElementById('regressionSiteSelectBtn').addEventListener('click', () => {
             renderSiteSelectList();
             document.getElementById('siteSelectOverlay').style.display = 'flex';
+            modalPush('siteSelectOverlay', closeSiteSelectModal);
         });
 
         // Close modal
@@ -4361,6 +4427,7 @@
                 setBtn.style.color        = '';
             }
             document.getElementById('siteSelectOverlay').style.display = 'none';
+            modalRemove('siteSelectOverlay');
         }
         document.getElementById('siteSelectCloseBtn').addEventListener('click', closeSiteSelectModal);
         document.getElementById('siteSelectDoneBtn').addEventListener('click', closeSiteSelectModal);
@@ -4472,15 +4539,9 @@
         });
 
         // Wire screenshot close
-        document.getElementById('screenshotCloseBtn').addEventListener('click', () => {
-            document.getElementById('screenshotOverlay').style.display = 'none';
-            document.getElementById('screenshotImg').src = '';
-        });
+        document.getElementById('screenshotCloseBtn').addEventListener('click', closeScreenshotOverlay);
         document.getElementById('screenshotOverlay').addEventListener('click', e => {
-            if (e.target === e.currentTarget) {
-                document.getElementById('screenshotOverlay').style.display = 'none';
-                document.getElementById('screenshotImg').src = '';
-            }
+            if (e.target === e.currentTarget) closeScreenshotOverlay();
         });
 
         // ============================================================================
@@ -4745,6 +4806,8 @@
             document.getElementById('siteDetail').style.display = 'none';
             document.getElementById('siteDashboard').style.display = '';
 
+            document.getElementById('sdObContent').innerHTML =
+                '<div class="sd-section-empty">Loading…</div>';
             document.getElementById('sdHbContent').innerHTML =
                 '<div class="sd-section-empty">Loading…</div>';
             document.getElementById('sdRegressionContent').innerHTML =
@@ -4754,7 +4817,13 @@
             document.getElementById('sdUpdateContent').innerHTML =
                 '<div class="sd-section-empty">Loading…</div>';
 
+            // Reset show-hidden toggle
+            document.getElementById('sdObContent').classList.remove('sd-ob-show-hidden');
+            document.getElementById('sdObShowHiddenBtn').classList.remove('active');
+            document.getElementById('sdObShowHiddenBtn').textContent = 'Show Hidden';
+
             await Promise.all([
+                loadSdOnboarding(),
                 loadSdHeartbeat(),
                 loadSdRegression(),
                 loadSdLinkCheck(),
@@ -6042,6 +6111,7 @@
                 setBtn.style.color        = '';
             }
             document.getElementById('lcSiteSelectOverlay').style.display = 'none';
+            modalRemove('lcSiteSelectOverlay');
         }
 
         // ── Scope toggles ─────────────────────────────────────────────────────────
@@ -6081,6 +6151,7 @@
         document.getElementById('lcSiteSelectBtn').addEventListener('click', () => {
             renderLcSiteSelectList();
             document.getElementById('lcSiteSelectOverlay').style.display = 'flex';
+            modalPush('lcSiteSelectOverlay', closeLcSiteSelectModal);
         });
         document.getElementById('lcSiteSelectCloseBtn').addEventListener('click', closeLcSiteSelectModal);
         document.getElementById('lcSiteSelectDoneBtn').addEventListener('click', closeLcSiteSelectModal);
@@ -6451,20 +6522,21 @@
 
         // ── Manage Fields Modal ───────────────────────────────────────────────────
 
-        document.getElementById('obManageFieldsBtn').addEventListener('click', openManageFields);
-        document.getElementById('obManageFieldsCloseBtn').addEventListener('click', () => {
+        function closeManageFields() {
             document.getElementById('obManageFieldsOverlay').classList.remove('visible');
+            modalRemove('obManageFieldsOverlay');
             loadOnboarding();
-        });
+        }
+
+        document.getElementById('obManageFieldsBtn').addEventListener('click', openManageFields);
+        document.getElementById('obManageFieldsCloseBtn').addEventListener('click', closeManageFields);
         document.getElementById('obManageFieldsOverlay').addEventListener('click', e => {
-            if (e.target === e.currentTarget) {
-                document.getElementById('obManageFieldsOverlay').classList.remove('visible');
-                loadOnboarding();
-            }
+            if (e.target === e.currentTarget) closeManageFields();
         });
 
         async function openManageFields() {
             document.getElementById('obManageFieldsOverlay').classList.add('visible');
+            modalPush('obManageFieldsOverlay', closeManageFields);
             await refreshManageFieldsList();
         }
 
@@ -6588,20 +6660,21 @@
 
         // ── Options Modal (site visibility) ─────────────────────────────────────
 
-        document.getElementById('obOptionsBtn').addEventListener('click', openObOptions);
-        document.getElementById('obOptionsCloseBtn').addEventListener('click', () => {
+        function closeObOptions() {
             document.getElementById('obOptionsOverlay').classList.remove('visible');
+            modalRemove('obOptionsOverlay');
             loadOnboarding();
-        });
+        }
+
+        document.getElementById('obOptionsBtn').addEventListener('click', openObOptions);
+        document.getElementById('obOptionsCloseBtn').addEventListener('click', closeObOptions);
         document.getElementById('obOptionsOverlay').addEventListener('click', e => {
-            if (e.target === e.currentTarget) {
-                document.getElementById('obOptionsOverlay').classList.remove('visible');
-                loadOnboarding();
-            }
+            if (e.target === e.currentTarget) closeObOptions();
         });
 
         async function openObOptions() {
             document.getElementById('obOptionsOverlay').classList.add('visible');
+            modalPush('obOptionsOverlay', closeObOptions);
             const sites = await apiCall('/sites').catch(() => []);
             const list = document.getElementById('obOptionsSiteList');
             list.innerHTML = sites.map(s => {
@@ -6626,6 +6699,110 @@
                 });
             });
         }
+
+        // ── Site Dashboard — Onboarding section ──────────────────────────────────
+
+        function _esc(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        async function loadSdOnboarding() {
+            const el = document.getElementById('sdObContent');
+            el.innerHTML = '<div class="sd-section-empty">Loading…</div>';
+            if (!_sdSiteId) return;
+            try {
+                const resp = await apiCall('/onboarding/data');
+                const fields = resp.fields || [];
+                const siteData = (resp.data || {})[_sdSiteId] || {};
+
+                if (!fields.length) {
+                    el.innerHTML = '<div class="sd-section-empty">No onboarding fields — add them in the Onboarding tab.</div>';
+                    return;
+                }
+
+                // Build ordered groups
+                const groups = [];
+                const groupMap = {};
+                for (const f of fields) {
+                    const g = f.group_name || 'General';
+                    if (!groupMap[g]) { groupMap[g] = []; groups.push(g); }
+                    groupMap[g].push(f);
+                }
+
+                let html = '<div class="sd-ob-grid">';
+                for (const g of groups) {
+                    const gFields = groupMap[g];
+                    const allHidden = gFields.every(f => f.hidden);
+                    html += `<div class="sd-ob-group${allHidden ? ' sd-ob-hidden' : ''}">`;
+                    html += `<div class="sd-ob-group-name">${_esc(g)}</div>`;
+                    for (const f of gFields) {
+                        const val = siteData[f.id] != null ? siteData[f.id] : (f.default_value || '');
+                        const rowHidden = f.hidden ? ' sd-ob-hidden' : '';
+                        const lblHidden = f.hidden ? ' sd-ob-hidden-label' : '';
+                        html += `<div class="sd-ob-row${rowHidden}" data-field-id="${_esc(f.id)}">`;
+                        html += `<span class="sd-ob-label${lblHidden}" title="${_esc(f.name)}">${_esc(f.name)}</span>`;
+                        html += `<div class="sd-ob-value">`;
+                        if (f.field_type === 'bool') {
+                            const on = val === '1' || val === 'true';
+                            html += `<span class="sd-ob-bool" data-bool-val="${on ? '1' : '0'}">${on ? '✅' : '⬜'}</span>`;
+                        } else if (f.field_type === 'url') {
+                            html += `<input class="sd-ob-input" type="url" value="${_esc(val)}" data-field-id="${_esc(f.id)}" placeholder="https://…">`;
+                        } else if (f.field_type === 'select') {
+                            let opts = [];
+                            try { opts = JSON.parse(f.options || '[]'); } catch(e) {}
+                            html += `<select class="sd-ob-input sd-ob-select" data-field-id="${_esc(f.id)}">`;
+                            html += `<option value="">—</option>`;
+                            for (const o of opts) {
+                                html += `<option value="${_esc(o)}" ${val === o ? 'selected' : ''}>${_esc(o)}</option>`;
+                            }
+                            html += `</select>`;
+                        } else {
+                            html += `<input class="sd-ob-input" type="text" value="${_esc(val)}" data-field-id="${_esc(f.id)}" placeholder="—">`;
+                        }
+                        html += `</div></div>`;
+                    }
+                    html += `</div>`;
+                }
+                html += '</div>';
+                el.innerHTML = html;
+
+                // Bool toggles
+                el.querySelectorAll('.sd-ob-bool').forEach(span => {
+                    span.addEventListener('click', async () => {
+                        const fieldId = span.closest('[data-field-id]').dataset.fieldId;
+                        const newVal = span.dataset.boolVal === '1' ? '0' : '1';
+                        span.dataset.boolVal = newVal;
+                        span.textContent = newVal === '1' ? '✅' : '⬜';
+                        await _saveObCell(fieldId, newVal);
+                    });
+                });
+
+                // Text / URL / select inputs
+                el.querySelectorAll('.sd-ob-input[data-field-id]').forEach(inp => {
+                    inp.addEventListener('change', () => _saveObCell(inp.dataset.fieldId, inp.value));
+                    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+                });
+
+            } catch (e) {
+                el.innerHTML = `<div class="sd-section-empty">Failed to load onboarding data.</div>`;
+            }
+        }
+
+        async function _saveObCell(fieldId, value) {
+            await fetch('/api/onboarding/data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ site_id: parseInt(_sdSiteId), field_id: fieldId, value }),
+            });
+        }
+
+        document.getElementById('sdObShowHiddenBtn').addEventListener('click', () => {
+            const content = document.getElementById('sdObContent');
+            const btn = document.getElementById('sdObShowHiddenBtn');
+            const showing = content.classList.toggle('sd-ob-show-hidden');
+            btn.classList.toggle('active', showing);
+            btn.textContent = showing ? 'Hide Hidden' : 'Show Hidden';
+        });
 
     </script>
 
