@@ -4864,7 +4864,21 @@
 
                 const dnsRecords = (() => { try { return JSON.parse(r.dns_json || '{}'); } catch { return {}; } })();
                 const rdapFlags = (() => { try { return JSON.parse(r.rdap_status_flags || '[]'); } catch { return []; } })();
+                const rdapNs    = (() => { try { return JSON.parse(r.rdap_nameservers  || '[]'); } catch { return []; } })();
                 const isLocked = rdapFlags.some(f => f.toLowerCase().includes('transfer'));
+                const hasRdapData = r.rdap_registrar || r.rdap_expires_at || rdapFlags.length || rdapNs.length;
+                const _eppLabel = f => ({ clientTransferProhibited:'Transfer locked', clientDeleteProhibited:'Deletion locked',
+                    clientUpdateProhibited:'Update locked', serverTransferProhibited:'Server transfer lock',
+                    serverDeleteProhibited:'Server deletion lock', ok:'Active' }[f] || f.replace(/([A-Z])/g,' $1').trim());
+                const rdapPanelHtml = [
+                    r.rdap_registrar  ? `<div><strong>Registrar:</strong> ${escapeHtml(r.rdap_registrar)}</div>` : '',
+                    r.rdap_created_at ? `<div><strong>Registered:</strong> ${escapeHtml(r.rdap_created_at)}</div>` : '',
+                    r.rdap_expires_at ? `<div><strong>Expires:</strong> ${escapeHtml(r.rdap_expires_at)}</div>` : '',
+                    rdapFlags.length  ? `<div><strong>Status:</strong> ${rdapFlags.map(f => escapeHtml(_eppLabel(f))).join(', ')}</div>` : '',
+                    rdapNs.length     ? `<div><strong>Nameservers:</strong> ${rdapNs.map(escapeHtml).join(', ')}</div>` : '',
+                    !r.rdap_registrar && !r.rdap_expires_at && !rdapNs.length
+                        ? `<div style="color:var(--text-muted);">Registrar data not available via RDAP for this domain.</div>` : '',
+                ].join('');
 
                 el.innerHTML = `
                 <div class="hb-grid">
@@ -4884,11 +4898,11 @@
                 ${r.smtp_detail ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;">SMTP: ${escapeHtml(r.smtp_detail)}</div>` : ''}
                 <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
                     ${Object.keys(dnsRecords).length ? `<button class="hb-toggle-details" data-target="sdDnsDetails">Show DNS ▾</button>` : ''}
-                    ${r.rdap_registrar ? `<button class="hb-toggle-details" data-target="sdRdapDetails">Show WHOIS ▾</button>` : ''}
+                    ${hasRdapData ? `<button class="hb-toggle-details" data-target="sdRdapDetails">Show WHOIS ▾</button>` : ''}
                     ${r.robots_content ? `<button class="hb-toggle-details" data-target="sdRobotsDetails">Show robots.txt ▾</button>` : ''}
                 </div>
                 <div id="sdDnsDetails" class="hb-details-panel">${escapeHtml(JSON.stringify(dnsRecords, null, 2))}</div>
-                <div id="sdRdapDetails" class="hb-details-panel">${escapeHtml(JSON.stringify(rdapFlags, null, 2))}</div>
+                <div id="sdRdapDetails" class="hb-details-panel" style="font-size:12px; line-height:1.8;">${rdapPanelHtml}</div>
                 <div id="sdRobotsDetails" class="hb-details-panel">${escapeHtml(r.robots_content || '')}</div>`;
 
                 el.querySelectorAll('.hb-toggle-details').forEach(btn => {
@@ -4915,20 +4929,20 @@
             try {
                 const rows = await fetch(`/api/regression/site/${_sdSiteId}/history`).then(r => r.json());
                 el.innerHTML = `<div style="overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                        <thead><tr style="text-align:left;font-size:11px;color:var(--text-muted);">
-                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);width:30px;">Status</th>
-                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Date</th>
-                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">HTTP</th>
-                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Load</th>
-                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">JS</th>
-                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Broken</th>
-                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Screenshot</th>
-                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Diff</th>
+                    <table class="log-table">
+                        <thead><tr>
+                            <th style="width:30px;">Status</th>
+                            <th>Date</th>
+                            <th>HTTP</th>
+                            <th>Load</th>
+                            <th>JS</th>
+                            <th>Broken</th>
+                            <th>Screenshot</th>
+                            <th>Diff</th>
                         </tr></thead>
                         <tbody id="sdRegHistoryBody"></tbody>
                     </table>
-                    <p id="sdRegHistoryEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:12px;display:none;">No regression runs for this site yet.</p>
+                    <p id="sdRegHistoryEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:13px;display:none;">No regression runs for this site yet.</p>
                 </div>`;
                 renderRegSiteHistoryInto(
                     { tbody: document.getElementById('sdRegHistoryBody'), emptyEl: document.getElementById('sdRegHistoryEmpty'), idPrefix: 'sd-hist' },
@@ -4944,11 +4958,11 @@
             try {
                 const history = await fetch(`/api/linkcheck/site/${_sdSiteId}/history`).then(r => r.json());
                 el.innerHTML = `<div style="overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <table class="log-table">
                         <thead id="sdLcHistoryThead"></thead>
                         <tbody id="sdLcHistoryBody"></tbody>
                     </table>
-                    <p id="sdLcHistoryEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:12px;display:none;">No link check runs for this site yet.</p>
+                    <p id="sdLcHistoryEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:13px;display:none;">No link check runs for this site yet.</p>
                 </div>`;
                 _lcLastHistoryData = history;
                 renderLcSiteHistoryBody(history, _sdSiteId,
@@ -4973,20 +4987,20 @@
                     return;
                 }
                 el.innerHTML = `<div style="overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <table class="log-table">
                         <thead id="sdUpdatesThead"></thead>
                         <tbody id="sdUpdatesBody"></tbody>
                     </table>
-                    <p id="sdUpdatesEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:12px;display:none;">No records.</p>
+                    <p id="sdUpdatesEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:13px;display:none;">No records.</p>
                 </div>`;
                 function sdRenderUpdates() {
                     const thead = document.getElementById('sdUpdatesThead');
                     const tbody = document.getElementById('sdUpdatesBody');
-                    thead.innerHTML = `<tr style="font-size:11px;color:var(--text-muted);">${cols.map(col => {
+                    thead.innerHTML = `<tr>${cols.map(col => {
                         const active = _sdUpdatesSort.col === col;
                         const arrow = active ? (_sdUpdatesSort.dir === 'asc' ? ' ↑' : ' ↓') : ' ⇅';
                         const bg = active ? 'background:var(--surface-2);' : '';
-                        return `<th style="${bg}padding:4px 8px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none;" data-col="${col}">${colLabels[col]}${arrow}</th>`;
+                        return `<th style="${bg}cursor:pointer;user-select:none;" data-col="${col}">${colLabels[col]}${arrow}</th>`;
                     }).join('')}</tr>`;
                     thead.querySelectorAll('th[data-col]').forEach(th => {
                         th.addEventListener('click', () => {
@@ -6241,12 +6255,13 @@
             downloadCsv(rows, `link-check-run-${run.id ?? 0}-${dateStr}.csv`);
         }
 
-        function exportLcSiteHistoryCsv() {
+        async function exportLcSiteHistoryCsv() {
             const siteName = (_lcCurrentHistorySite.name || 'site')
                 .replace(/[^a-z0-9]/gi, '-').toLowerCase();
+            const siteId = _lcCurrentHistorySite.id;
             const today = new Date().toISOString().slice(0, 10);
-            const rows = [['Date', 'Run ID', 'Pages Crawled', 'Total Links', 'Working', 'Broken']];
-            _lcLastHistoryData.forEach(r => {
+            const rows = [['Date', 'Run ID', 'Pages Crawled', 'Total Links', 'Working', 'Broken', 'Status/Error', 'Link URL', 'Found On']];
+            for (const r of _lcLastHistoryData) {
                 const d = new Date((r.started_at || '') + 'Z');
                 const total  = r.links_checked ?? 0;
                 const broken = r.broken_count  ?? 0;
@@ -6255,8 +6270,20 @@
                     r.run_id ?? '',
                     r.pages_crawled ?? 0,
                     total, total - broken, broken,
+                    '', '', '',
                 ]);
-            });
+                if (broken > 0) {
+                    try {
+                        const links = await lcGet(`/api/linkcheck/results/${r.run_id}/site/${siteId}`);
+                        links.forEach(link => rows.push([
+                            '', '', '', '', '', '',
+                            link.status_code || link.error || '',
+                            link.link_url    || '',
+                            link.source_page || '',
+                        ]));
+                    } catch { /* skip broken-link detail if fetch fails */ }
+                }
+            }
             downloadCsv(rows, `link-check-history-${siteName}-${today}.csv`);
         }
 
