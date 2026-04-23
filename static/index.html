@@ -1854,7 +1854,9 @@
         // ============================================================================
         const _SUBVIEW_TABS = ['cloudflare', 'regression', 'linkchecker'];
         const _SUBVIEW_DEFAULTS = { cloudflare: 'analytics', regression: 'sites', linkchecker: 'sites' };
-        let _pendingSiteRoute = null; // {subview, id} — set when routing to sites before list loads
+        let _pendingSiteRoute       = null; // {subview, id} — set when routing to sites before list loads
+        let _pendingRegSiteHistory = null; // site_id — set when routing to regression/sites/{id} before data loads
+        let _pendingLcSiteHistory  = null; // site_id — set when routing to linkchecker/sites/{id} before data loads
 
         function _getLastSubview(tab) {
             try { return JSON.parse(localStorage.getItem('wsp_last_subview') || '{}')[tab] || null; }
@@ -1923,19 +1925,61 @@
 
         // Regression sub-view
         function _applyRegSubview(subview, id) {
-            const mode = subview === 'runs' ? 'runs' : 'sites';
-            setRegView(mode, id || null);
+            if (subview === 'runs') {
+                setRegView('runs', id || null);
+                return;
+            }
+            // subview === 'sites' (possibly with a site-id for drill-down)
+            if (id) {
+                const sid = String(id);
+                const site = _lastSiteStatusResults.find(r => String(r.site_id) === sid);
+                if (site && _regViewMode === 'sites') {
+                    // Data already loaded — open drill-down directly
+                    openSiteRegHistory(sid, site.site_name || '', site.page_url || site.site_url || '');
+                } else {
+                    // Load sites list first; pending flag applied after render
+                    _pendingRegSiteHistory = sid;
+                    if (_currentHistorySiteId) closeSiteRegHistory();
+                    setRegView('sites');
+                }
+            } else {
+                if (_currentHistorySiteId) closeSiteRegHistory();
+                setRegView('sites');
+            }
         }
 
         // Link Checker sub-view
         function _applyLcSubview(subview, id) {
-            const mode = subview === 'runs' ? 'runs' : 'sites';
-            _lcViewMode = mode;
-            if (id) _lcSelectedRunId = String(id);
-            document.getElementById('lcViewSites').className = mode === 'sites' ? 'btn btn-primary' : 'btn';
-            document.getElementById('lcViewRuns').className  = mode === 'runs'  ? 'btn btn-primary' : 'btn';
-            document.getElementById('lcRunSelect').style.display = mode === 'runs' ? '' : 'none';
-            loadLinkChecker(); // reads _lcViewMode and _lcSelectedRunId
+            if (subview === 'runs') {
+                _lcViewMode = 'runs';
+                if (id) _lcSelectedRunId = String(id);
+                document.getElementById('lcViewSites').className = 'btn';
+                document.getElementById('lcViewRuns').className  = 'btn btn-primary';
+                document.getElementById('lcRunSelect').style.display = '';
+                loadLinkChecker();
+                return;
+            }
+            // subview === 'sites' (possibly with a site-id for drill-down)
+            _lcViewMode = 'sites';
+            document.getElementById('lcViewSites').className = 'btn btn-primary';
+            document.getElementById('lcViewRuns').className  = 'btn';
+            document.getElementById('lcRunSelect').style.display = 'none';
+            if (id) {
+                const sid = String(id);
+                const site = _lcSiteList.find(s => String(s.id) === sid);
+                if (site && _lcSiteList.length) {
+                    // Site list already loaded — open drill-down directly (no redundant reload)
+                    openLcSiteHistory(sid, site.name || '', site.url || '');
+                } else {
+                    // Load link checker first; pending flag applied after render
+                    _pendingLcSiteHistory = sid;
+                    if (_lcCurrentHistorySite.id) closeLcSiteHistory();
+                    loadLinkChecker();
+                }
+            } else {
+                if (_lcCurrentHistorySite.id) closeLcSiteHistory();
+                loadLinkChecker();
+            }
         }
 
         // Sites sub-view
@@ -3071,6 +3115,49 @@
             };
         }
 
+        // ── Updates shared sort + row renderer ───────────────────────────────────
+        const _updTypeColors = { plugins: 'var(--accent)', themes: 'var(--yellow)', wordpress: 'var(--green)' };
+
+        function _sortUpdateRecords(records, col, dir) {
+            return [...records].sort((a, b) => {
+                let aVal, bVal;
+                switch (col) {
+                    case 'site':        aVal = (a._site_name || '').toLowerCase(); bVal = (b._site_name || '').toLowerCase(); break;
+                    case 'type':        aVal = a._update_type || ''; bVal = b._update_type || ''; break;
+                    case 'name':        aVal = (a.name || a.title || a.slug || '').toLowerCase(); bVal = (b.name || b.title || b.slug || '').toLowerCase(); break;
+                    case 'old_version': aVal = a.old_version || ''; bVal = b.old_version || ''; break;
+                    case 'new_version': aVal = a.current_version || a.new_version || ''; bVal = b.current_version || b.new_version || ''; break;
+                    case 'date':
+                    default:
+                        return dir === 'asc' ? parseDateTs(a) - parseDateTs(b) : parseDateTs(b) - parseDateTs(a);
+                }
+                const cmp = String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
+                return dir === 'asc' ? cmp : -cmp;
+            });
+        }
+
+        // Renders sorted update rows into tbody. columns controls which cells are shown.
+        // Sort state is caller-owned so main-page and Site Dashboard can sort independently.
+        function renderUpdatesRowsInto({ tbody, records, columns, sortState }) {
+            const sorted = _sortUpdateRecords(records, sortState.col, sortState.dir);
+            tbody.innerHTML = sorted.map(rec => {
+                const typeColor = _updTypeColors[rec._update_type] || 'var(--text-muted)';
+                const name = rec.name || rec.title || rec.slug || '—';
+                const cells = columns.map(col => {
+                    switch (col) {
+                        case 'site':        return `<td>${escapeHtml(rec._site_name || '—')}</td>`;
+                        case 'type':        return `<td><span style="color:${typeColor}; font-weight:500; text-transform:capitalize;">${rec._update_type || '—'}</span></td>`;
+                        case 'name':        return `<td>${escapeHtml(name)}</td>`;
+                        case 'old_version': return `<td style="color:var(--text-muted);">${escapeHtml(rec.old_version || '—')}</td>`;
+                        case 'new_version': return `<td style="color:var(--green);">${escapeHtml(rec.current_version || rec.new_version || '—')}</td>`;
+                        case 'date':        return `<td style="white-space:nowrap;">${escapeHtml(formatDateOnly(rec))}</td>`;
+                        default: return '<td>—</td>';
+                    }
+                });
+                return `<tr>${cells.join('')}</tr>`;
+            }).join('');
+        }
+
         // ── Column sort state ─────────────────────────────────────────────────────
         let _sortCol = 'date';
         let _sortDir = 'desc'; // 'asc' | 'desc'
@@ -3182,62 +3269,12 @@
             }
             empty.style.display = 'none';
 
-            // Sort by active column
-            records.sort((a, b) => {
-                let aVal, bVal;
-                switch (_sortCol) {
-                    case 'site':
-                        aVal = (a._site_name || '').toLowerCase();
-                        bVal = (b._site_name || '').toLowerCase();
-                        break;
-                    case 'type':
-                        aVal = a._update_type || '';
-                        bVal = b._update_type || '';
-                        break;
-                    case 'name':
-                        aVal = (a.name || a.title || a.slug || '').toLowerCase();
-                        bVal = (b.name || b.title || b.slug || '').toLowerCase();
-                        break;
-                    case 'old_version':
-                        aVal = a.old_version || '';
-                        bVal = b.old_version || '';
-                        break;
-                    case 'new_version':
-                        aVal = a.current_version || a.new_version || '';
-                        bVal = b.current_version || b.new_version || '';
-                        break;
-                    case 'date':
-                    default:
-                        return _sortDir === 'asc'
-                            ? parseDateTs(a) - parseDateTs(b)
-                            : parseDateTs(b) - parseDateTs(a);
-                }
-                const cmp = String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
-                return _sortDir === 'asc' ? cmp : -cmp;
+            renderUpdatesRowsInto({
+                tbody,
+                records,
+                columns: ['site', 'type', 'name', 'old_version', 'new_version', 'date'],
+                sortState: { col: _sortCol, dir: _sortDir },
             });
-
-            const typeColors = {
-                plugins: 'var(--accent)',
-                themes: 'var(--yellow)',
-                wordpress: 'var(--green)',
-            };
-
-            tbody.innerHTML = records.map(rec => {
-                const typeColor = typeColors[rec._update_type] || 'var(--text-muted)';
-                const name = rec.name || rec.title || rec.slug || '—';
-                const oldVer = rec.old_version || '—';
-                const newVer = rec.current_version || rec.new_version || '—';
-                const date = formatDateOnly(rec);
-
-                return `<tr>
-                    <td>${escapeHtml(rec._site_name || '—')}</td>
-                    <td><span style="color:${typeColor}; font-weight:500; text-transform:capitalize;">${rec._update_type || '—'}</span></td>
-                    <td>${escapeHtml(name)}</td>
-                    <td style="color:var(--text-muted);">${escapeHtml(oldVer)}</td>
-                    <td style="color:var(--green);">${escapeHtml(newVer)}</td>
-                    <td style="white-space:nowrap;">${escapeHtml(date)}</td>
-                </tr>`;
-            }).join('');
         }
 
         // ============================================================================
@@ -3289,6 +3326,12 @@
                 }
                 const results = await statusResp.value.json();
                 renderSiteStatusTable(results);
+                if (_pendingRegSiteHistory) {
+                    const sid = _pendingRegSiteHistory;
+                    _pendingRegSiteHistory = null;
+                    const site = _lastSiteStatusResults.find(r => String(r.site_id) === sid);
+                    openSiteRegHistory(sid, site?.site_name || '', site?.page_url || site?.site_url || '');
+                }
             } catch (e) {
                 document.getElementById('regressionStatus').textContent = `Error: ${e.message}`;
             }
@@ -3511,11 +3554,11 @@
                 });
             });
 
-            // Row click → history (skip if an interactive element was clicked)
+            // Row click → history drill-down (skip if an interactive element was clicked)
             tbody.querySelectorAll('tr[data-site-id]').forEach(row => {
                 row.addEventListener('click', e => {
                     if (e.target.closest('a, button, .reg-detail-toggle, .diff-score-link')) return;
-                    openSiteRegHistory(row.dataset.siteId, row.dataset.siteName, row.dataset.siteUrl);
+                    navigate({ tab: 'regression', subview: 'sites', id: row.dataset.siteId });
                 });
             });
         }
@@ -3535,159 +3578,165 @@
 
         function closeSiteRegHistory() {
             _currentHistorySiteId = null;
+            history.replaceState(null, '', buildHash({ tab: 'regression', subview: 'sites' }));
             document.getElementById('siteHistoryPanel').style.display = 'none';
             document.getElementById('regressionTableWrap').style.display = '';
             document.getElementById('regressionSummary').style.display = '';
         }
 
+        // Shared renderer — called by both the main regression panel and the Site Dashboard.
+        // idPrefix must be unique per mount point to prevent detail-row id collisions.
+        function renderRegSiteHistoryInto({ tbody, emptyEl, idPrefix = 'hist' }, results) {
+            if (!results.length) {
+                tbody.innerHTML = '';
+                if (emptyEl) emptyEl.style.display = '';
+                return;
+            }
+            if (emptyEl) emptyEl.style.display = 'none';
+
+            tbody.innerHTML = results.map((r, idx) => {
+                const icon = r.has_issues ? '⚠️' : '✅';
+                const hasHttpError = r.http_status && r.http_status >= 400;
+                const jsErrs = safeJsonParse(r.js_errors, []);
+                const broken = safeJsonParse(r.broken_resources, []);
+                const rowBg = hasHttpError ? 'background:var(--red-bg);'
+                    : r.has_issues ? 'background:var(--yellow-bg);' : '';
+
+                const httpColor = !r.http_status ? 'var(--text-muted)'
+                    : r.http_status < 300 ? 'var(--green)'
+                    : r.http_status < 400 ? 'var(--yellow)'
+                    : 'var(--red)';
+
+                const lt = r.load_time_ms;
+                const loadStr = lt ? `${(lt / 1000).toFixed(1)}s` : '—';
+                const loadColor = !lt ? 'var(--text-muted)'
+                    : lt > 10000 ? 'var(--red)'
+                    : lt > 5000 ? 'var(--yellow)'
+                    : 'var(--text)';
+
+                const jsCell = jsErrs.length
+                    ? `<span class="reg-detail-toggle" data-target="${idPrefix}-js-${idx}"
+                          style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
+                          >${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
+                    : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
+
+                const brokenCell = broken.length
+                    ? `<span class="reg-detail-toggle" data-target="${idPrefix}-br-${idx}"
+                          style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
+                          >${broken.length} broken</span>`
+                    : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
+
+                const screenshotHtml = r.screenshot_path
+                    ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name || '')}" style="color:var(--accent); font-size:12px;">View</a>`
+                    : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+
+                let diffCell;
+                if (r.diff_score !== null && r.diff_score !== undefined) {
+                    const score = parseFloat(r.diff_score);
+                    const threshold = r.diff_threshold ?? 1.0;
+                    const diffColor = score === 0 ? 'var(--green)'
+                        : score < threshold ? 'var(--yellow)' : 'var(--red)';
+                    const hasCompare = r.diff_screenshot_path && r.prev_screenshot_path;
+                    diffCell = `<span class="${hasCompare ? 'diff-score-link' : ''}"
+                        style="color:${diffColor}; font-size:12px; font-weight:600; ${hasCompare ? 'cursor:pointer; text-decoration:underline;' : ''}"
+                        data-prev="${r.prev_screenshot_path ? encodeURIComponent(r.prev_screenshot_path) : ''}"
+                        data-diff="${r.diff_screenshot_path ? encodeURIComponent(r.diff_screenshot_path) : ''}"
+                        data-current="${r.screenshot_path ? encodeURIComponent(r.screenshot_path) : ''}"
+                        data-site="${escapeHtml(r.site_name || '')}"
+                        data-score="${score}"
+                        data-page-url="${encodeURIComponent(r.page_url || r.site_url || '')}"
+                        >${score === 0 ? '0% — no change' : score.toFixed(2) + '%'}</span>`;
+                } else {
+                    diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
+                }
+
+                const ts = r.run_started_at || r.checked_at;
+                const dateStr = ts ? new Date(ts).toLocaleDateString('en-US',
+                    { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+
+                const jsDetailRow = jsErrs.length ? `
+                    <tr id="${idPrefix}-js-${idx}" style="display:none; background:var(--surface-2);">
+                        <td></td><td colspan="7" style="padding:6px 12px;">
+                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">JS ERRORS</div>
+                            ${jsErrs.map(e => `<div style="font-family:monospace; font-size:11px; color:var(--red); margin-bottom:2px;">${escapeHtml(String(e))}</div>`).join('')}
+                        </td>
+                    </tr>` : '';
+
+                const brokenDetailRow = broken.length ? `
+                    <tr id="${idPrefix}-br-${idx}" style="display:none; background:var(--surface-2);">
+                        <td></td><td colspan="7" style="padding:6px 12px;">
+                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">BROKEN RESOURCES</div>
+                            ${broken.map(b => `<div style="font-family:monospace; font-size:11px; margin-bottom:2px;"><span style="color:var(--red); font-weight:500;">${b.status}</span> <span style="color:var(--text-muted);">${escapeHtml(b.url)}</span></div>`).join('')}
+                        </td>
+                    </tr>` : '';
+
+                return `<tr style="${rowBg}">
+                    <td style="text-align:center;">${icon}</td>
+                    <td style="font-size:12px; color:var(--text-muted);">${dateStr}</td>
+                    <td style="color:${httpColor}; font-weight:500;">${r.http_status || '—'}</td>
+                    <td style="color:${loadColor};">${loadStr}</td>
+                    <td>${jsCell}</td>
+                    <td>${brokenCell}</td>
+                    <td style="text-align:center;">${screenshotHtml}</td>
+                    <td style="text-align:center;">${diffCell}</td>
+                </tr>${jsDetailRow}${brokenDetailRow}`;
+            }).join('');
+
+            tbody.querySelectorAll('.screenshot-link').forEach(link => {
+                link.addEventListener('click', e => {
+                    e.preventDefault();
+                    document.getElementById('screenshotImg').src = link.dataset.src;
+                    document.getElementById('screenshotTitle').textContent = link.dataset.site;
+                    document.getElementById('screenshotOverlay').style.display = 'flex';
+                });
+            });
+
+            tbody.querySelectorAll('.reg-detail-toggle').forEach(el => {
+                el.addEventListener('click', () => {
+                    const target = document.getElementById(el.dataset.target);
+                    if (target) {
+                        const visible = target.style.display !== 'none';
+                        target.style.display = visible ? 'none' : '';
+                        el.style.fontWeight = visible ? 'normal' : '700';
+                    }
+                });
+            });
+
+            tbody.querySelectorAll('.diff-score-link').forEach(el => {
+                el.addEventListener('click', () => {
+                    const pageUrl = decodeURIComponent(el.dataset.pageUrl || '');
+                    const prevPath = decodeURIComponent(el.dataset.prev || '');
+                    const diffPath = decodeURIComponent(el.dataset.diff || '');
+                    const currentPath = decodeURIComponent(el.dataset.current || '');
+                    const score = el.dataset.score;
+                    document.getElementById('diffTitle').textContent = `Visual Diff — ${el.dataset.site}`;
+                    document.getElementById('diffSubtitle').textContent =
+                        `${pageUrl || ''}  •  ${parseFloat(score).toFixed(2)}% pixels changed`;
+                    document.getElementById('diffBaselineImg').src = prevPath ? `/api/regression/screenshot/${prevPath}` : '';
+                    document.getElementById('diffDiffImg').src = diffPath ? `/api/regression/screenshot/${diffPath}` : '';
+                    document.getElementById('diffCurrentImg').src = currentPath ? `/api/regression/screenshot/${currentPath}` : '';
+                    document.getElementById('diffOverlay').style.display = 'flex';
+                });
+            });
+        }
+
         async function loadSiteRegHistory(siteId) {
             const tbody = document.getElementById('siteHistoryBody');
-            const empty = document.getElementById('siteHistoryEmpty');
+            const emptyEl = document.getElementById('siteHistoryEmpty');
             tbody.innerHTML = `<tr><td colspan="8" style="color:var(--text-muted); padding:20px; text-align:center;">Loading…</td></tr>`;
-            empty.style.display = 'none';
+            emptyEl.style.display = 'none';
             try {
                 const resp = await fetch(`/api/regression/site/${siteId}/history`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const results = await resp.json();
-                if (!results.length) {
-                    tbody.innerHTML = '';
-                    empty.style.display = '';
-                    return;
-                }
-                tbody.innerHTML = results.map((r, idx) => {
-                    const icon = r.has_issues ? '⚠️' : '✅';
-                    const hasHttpError = r.http_status && r.http_status >= 400;
-                    const jsErrs = safeJsonParse(r.js_errors, []);
-                    const broken = safeJsonParse(r.broken_resources, []);
-                    const rowBg = hasHttpError ? 'background:var(--red-bg);'
-                        : r.has_issues ? 'background:var(--yellow-bg);' : '';
-
-                    const httpColor = !r.http_status ? 'var(--text-muted)'
-                        : r.http_status < 300 ? 'var(--green)'
-                        : r.http_status < 400 ? 'var(--yellow)'
-                        : 'var(--red)';
-
-                    const lt = r.load_time_ms;
-                    const loadStr = lt ? `${(lt / 1000).toFixed(1)}s` : '—';
-                    const loadColor = !lt ? 'var(--text-muted)'
-                        : lt > 10000 ? 'var(--red)'
-                        : lt > 5000 ? 'var(--yellow)'
-                        : 'var(--text)';
-
-                    const jsCell = jsErrs.length
-                        ? `<span class="reg-detail-toggle" data-target="hist-js-${idx}"
-                              style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
-                              >${jsErrs.length} error${jsErrs.length > 1 ? 's' : ''}</span>`
-                        : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
-
-                    const brokenCell = broken.length
-                        ? `<span class="reg-detail-toggle" data-target="hist-br-${idx}"
-                              style="color:var(--red); font-size:12px; cursor:pointer; text-decoration:underline;"
-                              >${broken.length} broken</span>`
-                        : '<span style="color:var(--text-muted); font-size:12px;">None</span>';
-
-                    const screenshotHtml = r.screenshot_path
-                        ? `<a href="#" class="screenshot-link" data-src="/api/regression/screenshot/${encodeURIComponent(r.screenshot_path)}" data-site="${escapeHtml(r.site_name || '')}" style="color:var(--accent); font-size:12px;">View</a>`
-                        : '<span style="color:var(--text-muted); font-size:12px;">—</span>';
-
-                    let diffCell;
-                    if (r.diff_score !== null && r.diff_score !== undefined) {
-                        const score = parseFloat(r.diff_score);
-                        const threshold = r.diff_threshold ?? 1.0;
-                        const diffColor = score === 0 ? 'var(--green)'
-                            : score < threshold ? 'var(--yellow)' : 'var(--red)';
-                        const hasCompare = r.diff_screenshot_path && r.prev_screenshot_path;
-                        diffCell = `<span class="${hasCompare ? 'diff-score-link' : ''}"
-                            style="color:${diffColor}; font-size:12px; font-weight:600; ${hasCompare ? 'cursor:pointer; text-decoration:underline;' : ''}"
-                            data-prev="${r.prev_screenshot_path ? encodeURIComponent(r.prev_screenshot_path) : ''}"
-                            data-diff="${r.diff_screenshot_path ? encodeURIComponent(r.diff_screenshot_path) : ''}"
-                            data-current="${r.screenshot_path ? encodeURIComponent(r.screenshot_path) : ''}"
-                            data-site="${escapeHtml(r.site_name || '')}"
-                            data-score="${score}"
-                            data-page-url="${encodeURIComponent(r.page_url || r.site_url || '')}"
-                            >${score === 0 ? '0% — no change' : score.toFixed(2) + '%'}</span>`;
-                    } else {
-                        diffCell = '<span style="color:var(--text-muted); font-size:12px;">—</span>';
-                    }
-
-                    const ts = r.run_started_at || r.checked_at;
-                    const dateStr = ts ? new Date(ts).toLocaleDateString('en-US',
-                        { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
-
-                    const jsDetailRow = jsErrs.length ? `
-                        <tr id="hist-js-${idx}" style="display:none; background:var(--surface-2);">
-                            <td></td><td colspan="7" style="padding:6px 12px;">
-                                <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">JS ERRORS</div>
-                                ${jsErrs.map(e => `<div style="font-family:monospace; font-size:11px; color:var(--red); margin-bottom:2px;">${escapeHtml(String(e))}</div>`).join('')}
-                            </td>
-                        </tr>` : '';
-
-                    const brokenDetailRow = broken.length ? `
-                        <tr id="hist-br-${idx}" style="display:none; background:var(--surface-2);">
-                            <td></td><td colspan="7" style="padding:6px 12px;">
-                                <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">BROKEN RESOURCES</div>
-                                ${broken.map(b => `<div style="font-family:monospace; font-size:11px; margin-bottom:2px;"><span style="color:var(--red); font-weight:500;">${b.status}</span> <span style="color:var(--text-muted);">${escapeHtml(b.url)}</span></div>`).join('')}
-                            </td>
-                        </tr>` : '';
-
-                    return `<tr style="${rowBg}">
-                        <td style="text-align:center;">${icon}</td>
-                        <td style="font-size:12px; color:var(--text-muted);">${dateStr}</td>
-                        <td style="color:${httpColor}; font-weight:500;">${r.http_status || '—'}</td>
-                        <td style="color:${loadColor};">${loadStr}</td>
-                        <td>${jsCell}</td>
-                        <td>${brokenCell}</td>
-                        <td style="text-align:center;">${screenshotHtml}</td>
-                        <td style="text-align:center;">${diffCell}</td>
-                    </tr>${jsDetailRow}${brokenDetailRow}`;
-                }).join('');
-
-                // Wire interactive elements
-                tbody.querySelectorAll('.screenshot-link').forEach(link => {
-                    link.addEventListener('click', e => {
-                        e.preventDefault();
-                        document.getElementById('screenshotImg').src = link.dataset.src;
-                        document.getElementById('screenshotTitle').textContent = link.dataset.site;
-                        document.getElementById('screenshotOverlay').style.display = 'flex';
-                    });
-                });
-
-                tbody.querySelectorAll('.reg-detail-toggle').forEach(el => {
-                    el.addEventListener('click', () => {
-                        const target = document.getElementById(el.dataset.target);
-                        if (target) {
-                            const visible = target.style.display !== 'none';
-                            target.style.display = visible ? 'none' : '';
-                            el.style.fontWeight = visible ? 'normal' : '700';
-                        }
-                    });
-                });
-
-                tbody.querySelectorAll('.diff-score-link').forEach(el => {
-                    el.addEventListener('click', () => {
-                        const pageUrl = decodeURIComponent(el.dataset.pageUrl || '');
-                        const prevPath = decodeURIComponent(el.dataset.prev || '');
-                        const diffPath = decodeURIComponent(el.dataset.diff || '');
-                        const currentPath = decodeURIComponent(el.dataset.current || '');
-                        const score = el.dataset.score;
-                        document.getElementById('diffTitle').textContent = `Visual Diff — ${el.dataset.site}`;
-                        document.getElementById('diffSubtitle').textContent =
-                            `${pageUrl || ''}  •  ${parseFloat(score).toFixed(2)}% pixels changed`;
-                        document.getElementById('diffBaselineImg').src = prevPath ? `/api/regression/screenshot/${prevPath}` : '';
-                        document.getElementById('diffDiffImg').src = diffPath ? `/api/regression/screenshot/${diffPath}` : '';
-                        document.getElementById('diffCurrentImg').src = currentPath ? `/api/regression/screenshot/${currentPath}` : '';
-                        document.getElementById('diffOverlay').style.display = 'flex';
-                    });
-                });
-
+                renderRegSiteHistoryInto({ tbody, emptyEl }, results);
             } catch (e) {
                 tbody.innerHTML = `<tr><td colspan="8" style="color:var(--red); padding:12px;">Error: ${e.message}</td></tr>`;
             }
         }
 
         document.getElementById('siteHistoryBackBtn').addEventListener('click', () => {
-            closeSiteRegHistory();
-            loadSiteStatus();
+            navigate({ tab: 'regression', subview: 'sites' });
         });
 
         async function checkRegressionAvailability() {
@@ -4861,79 +4910,98 @@
         async function loadSdRegression() {
             if (!_sdSiteId) return;
             const el = document.getElementById('sdRegressionContent');
+            el.innerHTML = '<div style="color:var(--text-muted);padding:16px;text-align:center;font-size:12px;">Loading…</div>';
             try {
-                const rows = await fetch(`/api/regression/site/${_sdSiteId}/history`).then(r=>r.json());
-                if (!rows.length) { el.innerHTML = '<div class="sd-section-empty">No regression runs for this site yet.</div>'; return; }
-                el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-                    <thead><tr style="text-align:left;">
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Date</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Page</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">HTTP</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Diff%</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Issues</th>
-                    </tr></thead>
-                    <tbody>${rows.slice(0, 20).map(r => {
-                        const d = new Date(r.run_started_at || r.checked_at);
-                        const hasDiff = r.diff_score != null;
-                        const issueColor = r.has_issues ? 'var(--red,#f87171)' : '#4ade80';
-                        return `<tr>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${d.toLocaleDateString()}</td>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${escapeHtml((r.page_url||r.site_url||'').replace(/^https?:\/\//,'').slice(0,40))}</td>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${r.http_status||'—'}</td>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${hasDiff ? r.diff_score.toFixed(1)+'%' : '—'}</td>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:${issueColor};">${r.has_issues ? 'Yes' : 'No'}</td>
-                        </tr>`;
-                    }).join('')}</tbody></table>`;
+                const rows = await fetch(`/api/regression/site/${_sdSiteId}/history`).then(r => r.json());
+                el.innerHTML = `<div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="text-align:left;font-size:11px;color:var(--text-muted);">
+                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);width:30px;">Status</th>
+                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Date</th>
+                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">HTTP</th>
+                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Load</th>
+                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">JS</th>
+                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Broken</th>
+                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Screenshot</th>
+                            <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Diff</th>
+                        </tr></thead>
+                        <tbody id="sdRegHistoryBody"></tbody>
+                    </table>
+                    <p id="sdRegHistoryEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:12px;display:none;">No regression runs for this site yet.</p>
+                </div>`;
+                renderRegSiteHistoryInto(
+                    { tbody: document.getElementById('sdRegHistoryBody'), emptyEl: document.getElementById('sdRegHistoryEmpty'), idPrefix: 'sd-hist' },
+                    rows
+                );
             } catch { el.innerHTML = '<div class="sd-section-empty">Error loading regression history.</div>'; }
         }
 
         async function loadSdLinkCheck() {
             if (!_sdSiteId) return;
             const el = document.getElementById('sdLinkCheckContent');
+            el.innerHTML = '<div style="color:var(--text-muted);padding:16px;text-align:center;font-size:12px;">Loading…</div>';
             try {
-                const rows = await fetch(`/api/linkcheck/site/${_sdSiteId}/history`).then(r=>r.json());
-                if (!rows.length) { el.innerHTML = '<div class="sd-section-empty">No link check runs for this site yet.</div>'; return; }
-                el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-                    <thead><tr style="text-align:left;">
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Date</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Pages</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Links</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Broken</th>
-                    </tr></thead>
-                    <tbody>${rows.slice(0, 20).map(r => {
-                        const d = new Date(r.started_at);
-                        const brokenColor = r.broken_count > 0 ? 'var(--red,#f87171)' : '#4ade80';
-                        return `<tr>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${d.toLocaleDateString()}</td>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${r.pages_crawled}</td>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${r.links_checked}</td>
-                            <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:${brokenColor};font-weight:600;">${r.broken_count}</td>
-                        </tr>`;
-                    }).join('')}</tbody></table>`;
+                const history = await fetch(`/api/linkcheck/site/${_sdSiteId}/history`).then(r => r.json());
+                el.innerHTML = `<div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead id="sdLcHistoryThead"></thead>
+                        <tbody id="sdLcHistoryBody"></tbody>
+                    </table>
+                    <p id="sdLcHistoryEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:12px;display:none;">No link check runs for this site yet.</p>
+                </div>`;
+                _lcLastHistoryData = history;
+                renderLcSiteHistoryBody(history, _sdSiteId,
+                    { tbodyId: 'sdLcHistoryBody', theadId: 'sdLcHistoryThead', emptyId: 'sdLcHistoryEmpty' });
             } catch { el.innerHTML = '<div class="sd-section-empty">Error loading link check history.</div>'; }
         }
+
+        let _sdUpdatesSort = { col: 'date', dir: 'desc' };
 
         async function loadSdUpdates() {
             if (!_sdSiteId) return;
             const el = document.getElementById('sdUpdateContent');
+            el.innerHTML = '<div style="color:var(--text-muted);padding:16px;text-align:center;font-size:12px;">Loading…</div>';
+            const cols = ['type', 'name', 'old_version', 'new_version', 'date'];
+            const colLabels = { type: 'Type', name: 'Name', old_version: 'Old Version', new_version: 'New Version', date: 'Date' };
             try {
-                const resp = await fetch(`/api/mainwp/update-history/cached?site_id=${_sdSiteId}&limit=30`);
-                const rows = await resp.json();
-                const list = Array.isArray(rows) ? rows : (rows.data || []);
-                if (!list.length) { el.innerHTML = '<div class="sd-section-empty">No update history for this site.</div>'; return; }
-                el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-                    <thead><tr style="text-align:left;">
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Date</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Type</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Name</th>
-                        <th style="padding:4px 8px;border-bottom:1px solid var(--border);">Version</th>
-                    </tr></thead>
-                    <tbody>${list.slice(0, 30).map(r => `<tr>
-                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${(r.updated_date||'').slice(0,10)}</td>
-                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${escapeHtml(r.update_type||'')}</td>
-                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);">${escapeHtml(r.name||'')}</td>
-                        <td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${escapeHtml((r.old_version||''))} → ${escapeHtml((r.new_version||''))}</td>
-                    </tr>`).join('')}</tbody></table>`;
+                const resp = await fetch(`/api/mainwp/update-history/cached?site_id=${_sdSiteId}&limit=50`);
+                const raw = await resp.json();
+                const records = (Array.isArray(raw) ? raw : (raw.data || [])).map(normalizeRecord);
+                if (!records.length) {
+                    el.innerHTML = '<div class="sd-section-empty">No update history for this site.</div>';
+                    return;
+                }
+                el.innerHTML = `<div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead id="sdUpdatesThead"></thead>
+                        <tbody id="sdUpdatesBody"></tbody>
+                    </table>
+                    <p id="sdUpdatesEmpty" style="color:var(--text-muted);text-align:center;padding:16px;font-size:12px;display:none;">No records.</p>
+                </div>`;
+                function sdRenderUpdates() {
+                    const thead = document.getElementById('sdUpdatesThead');
+                    const tbody = document.getElementById('sdUpdatesBody');
+                    thead.innerHTML = `<tr style="font-size:11px;color:var(--text-muted);">${cols.map(col => {
+                        const active = _sdUpdatesSort.col === col;
+                        const arrow = active ? (_sdUpdatesSort.dir === 'asc' ? ' ↑' : ' ↓') : ' ⇅';
+                        const bg = active ? 'background:var(--surface-2);' : '';
+                        return `<th style="${bg}padding:4px 8px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none;" data-col="${col}">${colLabels[col]}${arrow}</th>`;
+                    }).join('')}</tr>`;
+                    thead.querySelectorAll('th[data-col]').forEach(th => {
+                        th.addEventListener('click', () => {
+                            const col = th.dataset.col;
+                            if (_sdUpdatesSort.col === col) {
+                                _sdUpdatesSort.dir = _sdUpdatesSort.dir === 'asc' ? 'desc' : 'asc';
+                            } else {
+                                _sdUpdatesSort.col = col;
+                                _sdUpdatesSort.dir = col === 'date' ? 'desc' : 'asc';
+                            }
+                            sdRenderUpdates();
+                        });
+                    });
+                    renderUpdatesRowsInto({ tbody, records, columns: cols, sortState: _sdUpdatesSort });
+                }
+                sdRenderUpdates();
             } catch { el.innerHTML = '<div class="sd-section-empty">Error loading update history.</div>'; }
         }
 
@@ -5146,6 +5214,12 @@
                 for (const s of siteStatus) statusById[String(s.site_id)] = s;
                 updateLcSummaryFromSiteStatus(siteStatus);
                 renderLcSiteStatusTable(statusById);
+                if (_pendingLcSiteHistory) {
+                    const sid = _pendingLcSiteHistory;
+                    _pendingLcSiteHistory = null;
+                    const site = _lcSiteList.find(s => String(s.id) === sid);
+                    openLcSiteHistory(sid, site?.name || '', site?.url || '');
+                }
             } catch (e) {
                 renderLcTableError(`Error loading site status: ${e.message}`);
             }
@@ -5297,7 +5371,7 @@
 
             body.querySelectorAll('tr[data-site-id]').forEach(row => {
                 row.addEventListener('click', () => {
-                    openLcSiteHistory(row.dataset.siteId, row.dataset.siteName, row.dataset.siteUrl);
+                    navigate({ tab: 'linkchecker', subview: 'sites', id: row.dataset.siteId });
                 });
             });
         }
@@ -5315,15 +5389,18 @@
         }
 
         function closeLcSiteHistory() {
+            _lcCurrentHistorySite = { id: null, name: '', url: '' };
+            history.replaceState(null, '', buildHash({ tab: 'linkchecker', subview: 'sites' }));
             document.getElementById('lcSiteHistoryPanel').style.display = 'none';
             document.getElementById('lcTableWrap').style.display = '';
             if (_lcLatestRunMeta) {
                 document.getElementById('lcSummary').style.display = '';
             }
-            if (_lcViewMode === 'sites') loadLcSiteStatus();
         }
 
-        document.getElementById('lcSiteHistoryBackBtn').addEventListener('click', closeLcSiteHistory);
+        document.getElementById('lcSiteHistoryBackBtn').addEventListener('click', () => {
+            navigate({ tab: 'linkchecker', subview: 'sites' });
+        });
 
         async function loadLcSiteHistory(siteId) {
             const tbody = document.getElementById('lcSiteHistoryBody');
@@ -5340,13 +5417,17 @@
             }
         }
 
-        function renderLcSiteHistoryBody(history, siteId) {
-            const tbody = document.getElementById('lcSiteHistoryBody');
-            const empty = document.getElementById('lcSiteHistoryEmpty');
+        // target defaults to the main-page history panel ids. Pass alternate ids for Site Dashboard.
+        // Safe to share _lcHistoryRowMap because the main-page panel and Site Dashboard are on
+        // different tabs and can never both be visible at the same time.
+        function renderLcSiteHistoryBody(history, siteId, target) {
+            const t = target || { tbodyId: 'lcSiteHistoryBody', theadId: 'lcSiteHistoryThead', emptyId: 'lcSiteHistoryEmpty' };
+            const tbody = document.getElementById(t.tbodyId);
+            const empty = document.getElementById(t.emptyId);
             const COLS  = 5;
 
             // Generate sortable thead
-            const thead = document.getElementById('lcSiteHistoryThead');
+            const thead = document.getElementById(t.theadId);
             thead.innerHTML = `<tr>
                 <th style="width:40px;">Status</th>
                 ${_sortTh('Date', 'date', _lcHistorySort)}
@@ -5359,7 +5440,7 @@
                     const col = th.dataset.sortCol;
                     if (_lcHistorySort.col === col) _lcHistorySort.dir *= -1;
                     else { _lcHistorySort.col = col; _lcHistorySort.dir = 1; }
-                    renderLcSiteHistoryBody(_lcLastHistoryData, _lcCurrentHistorySite.id);
+                    renderLcSiteHistoryBody(_lcLastHistoryData, _lcCurrentHistorySite.id, target);
                 });
             });
 
