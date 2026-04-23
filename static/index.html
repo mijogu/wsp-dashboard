@@ -1002,47 +1002,6 @@
                 </div>
             </div>
 
-            <!-- Screenshot modal -->
-            <div id="screenshotOverlay" class="modal-overlay" style="z-index:250; align-items:flex-start; overflow:hidden; padding:40px 0;">
-                <div class="modal" style="max-width:900px; width:90vw; padding:0; margin:0 auto; display:flex; flex-direction:column; max-height:calc(100vh - 80px); overflow:hidden;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--surface); border-radius:10px 10px 0 0; flex-shrink:0;">
-                        <h3 id="screenshotTitle" style="font-size:14px; font-weight:600;">Screenshot</h3>
-                        <button class="btn" id="screenshotCloseBtn" style="font-size:12px; padding:4px 10px;">✕ Close</button>
-                    </div>
-                    <div style="overflow-y:auto; flex:1;">
-                        <img id="screenshotImg" style="width:100%; border-radius:0 0 6px 6px; border:1px solid var(--border); display:block;" src="" alt="Screenshot">
-                    </div>
-                </div>
-            </div>
-
-            <!-- Visual diff comparison viewer -->
-            <div id="diffOverlay" class="modal-overlay" style="z-index:260; align-items:flex-start; overflow:hidden; padding:30px 0;">
-                <div class="modal" style="max-width:1200px; width:95vw; padding:0; margin:0 auto; display:flex; flex-direction:column; max-height:calc(100vh - 60px); overflow:hidden;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--surface); border-radius:10px 10px 0 0; border-bottom:1px solid var(--border); flex-shrink:0;">
-                        <div>
-                            <h3 id="diffTitle" style="font-size:14px; font-weight:600; margin:0;">Visual Diff</h3>
-                            <div id="diffSubtitle" style="font-size:11px; color:var(--text-muted); margin-top:2px;"></div>
-                        </div>
-                        <button class="btn" id="diffCloseBtn" style="font-size:12px; padding:4px 10px;">✕ Close</button>
-                    </div>
-                    <div style="overflow-y:auto; flex:1;">
-                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:10px;">
-                            <div>
-                                <div style="font-size:11px; font-weight:600; color:var(--text-muted); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Previous</div>
-                                <img id="diffBaselineImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Previous">
-                            </div>
-                            <div>
-                                <div style="font-size:11px; font-weight:600; color:var(--yellow); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Diff (red = changed)</div>
-                                <img id="diffDiffImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Diff">
-                            </div>
-                            <div>
-                                <div style="font-size:11px; font-weight:600; color:var(--accent); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Current</div>
-                                <img id="diffCurrentImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Current">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Link Checker Tab -->
@@ -4966,7 +4925,7 @@
             try {
                 const resp = await fetch(`/api/mainwp/update-history/cached?site_id=${_sdSiteId}&limit=50`);
                 const raw = await resp.json();
-                const records = (Array.isArray(raw) ? raw : (raw.data || [])).map(normalizeRecord);
+                const records = (Array.isArray(raw) ? raw : (raw.records || [])).map(normalizeRecord);
                 if (!records.length) {
                     el.innerHTML = '<div class="sd-section-empty">No update history for this site.</div>';
                     return;
@@ -6613,6 +6572,48 @@
             <span id="logToggle" class="log-toggle">Collapse</span>
         </div>
         <div id="logBody" class="log-body"></div>
+    </div>
+
+    <!-- Screenshot modal — global, outside all tab-content divs so position:fixed works from any tab -->
+    <div id="screenshotOverlay" class="modal-overlay" style="z-index:250; align-items:flex-start; overflow:hidden; padding:40px 0;">
+        <div class="modal" style="max-width:900px; width:90vw; padding:0; margin:0 auto; display:flex; flex-direction:column; max-height:calc(100vh - 80px); overflow:hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--surface); border-radius:10px 10px 0 0; flex-shrink:0;">
+                <h3 id="screenshotTitle" style="font-size:14px; font-weight:600;">Screenshot</h3>
+                <button class="btn" id="screenshotCloseBtn" style="font-size:12px; padding:4px 10px;">✕ Close</button>
+            </div>
+            <div style="overflow-y:auto; flex:1;">
+                <img id="screenshotImg" style="width:100%; border-radius:0 0 6px 6px; border:1px solid var(--border); display:block;" src="" alt="Screenshot">
+            </div>
+        </div>
+    </div>
+
+    <!-- Visual diff comparison viewer — global, outside all tab-content divs so position:fixed works from any tab -->
+    <div id="diffOverlay" class="modal-overlay" style="z-index:260; align-items:flex-start; overflow:hidden; padding:30px 0;">
+        <div class="modal" style="max-width:1200px; width:95vw; padding:0; margin:0 auto; display:flex; flex-direction:column; max-height:calc(100vh - 60px); overflow:hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--surface); border-radius:10px 10px 0 0; border-bottom:1px solid var(--border); flex-shrink:0;">
+                <div>
+                    <h3 id="diffTitle" style="font-size:14px; font-weight:600; margin:0;">Visual Diff</h3>
+                    <div id="diffSubtitle" style="font-size:11px; color:var(--text-muted); margin-top:2px;"></div>
+                </div>
+                <button class="btn" id="diffCloseBtn" style="font-size:12px; padding:4px 10px;">✕ Close</button>
+            </div>
+            <div style="overflow-y:auto; flex:1;">
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:10px;">
+                    <div>
+                        <div style="font-size:11px; font-weight:600; color:var(--text-muted); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Previous</div>
+                        <img id="diffBaselineImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Previous">
+                    </div>
+                    <div>
+                        <div style="font-size:11px; font-weight:600; color:var(--yellow); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Diff (red = changed)</div>
+                        <img id="diffDiffImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Diff">
+                    </div>
+                    <div>
+                        <div style="font-size:11px; font-weight:600; color:var(--accent); text-align:center; padding:6px 0; background:var(--surface-2); border-radius:4px 4px 0 0;">Current</div>
+                        <img id="diffCurrentImg" style="width:100%; display:block; border:1px solid var(--border); border-top:none;" src="" alt="Current">
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </body>
 </html>
