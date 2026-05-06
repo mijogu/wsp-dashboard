@@ -1,0 +1,21 @@
+id,section,name,description,field_type,options,requires_new_client,requires_current_client,requires_redesign,requires_new_site,requires_custom_host,target_field_id
+local_backups,Backups,Local Backups,,bool,,,,,,,local_backups
+aws_backups,Backups,AWS Backups,,bool,,,,,,,aws_backups
+hosting_billing,Billing,Hosting Billing Contact,,text,,,,,,,hosting_billing
+domain_billing,Billing,Domain Billing Contact,,text,,,,,,,domain_billing
+hosting_provider,Infrastructure,Hosting Provider,,text,,,,,,,hosting_provider
+domain_registrar,Infrastructure,Domain Registrar,,text,,,,,,,domain_registrar
+dns_host,Infrastructure,DNS Host,,text,,,,,,,dns_host
+email_host,Infrastructure,Email Host,,text,,,,,,,email_host
+uptime_robot,Monitoring,Uptime Robot,,bool,,,,,,,uptime_robot
+gsc_access,Monitoring,GSC Access,,bool,,,,,,,gsc_access
+ga_connected,Monitoring,GA Connected,,bool,,,,,,,ga_connected
+cloudflare_active,Security,Cloudflare Active,,bool,,,,,,,cloudflare_active
+spf,Security,SPF,,bool,,,,,,,spf
+dkim,Security,DKIM,,bool,,,,,,,dkim
+dmarc,Security,DMARC,,bool,,,,,,,dmarc
+two_fa,Security,2FA Enabled,,bool,,,,,,,two_fa
+wordfence,Security,Wordfence,,bool,,,,,,,wordfence
+cleantalk,Security,CleanTalk,,bool,,,,,,,cleantalk
+staging_url,Staging,Staging URL,,url,,,,,,,staging_url
+staging_basic_auth,Staging,Basic Auth,,bool,,,,,,,staging_basic_auth

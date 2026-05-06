@@ -261,6 +261,32 @@ def init_db():
             ON heartbeat_results(site_id, checked_at DESC);
         CREATE INDEX IF NOT EXISTS idx_heartbeat_results_run
             ON heartbeat_results(run_id);
+
+        -- Onboarding checklist instances (one per client engagement)
+        CREATE TABLE IF NOT EXISTS onboarding_checklists (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_name    TEXT NOT NULL,
+            site_url       TEXT,
+            is_new_client  INTEGER NOT NULL DEFAULT 1,
+            is_redesign    INTEGER NOT NULL DEFAULT 0,
+            is_new_site    INTEGER NOT NULL DEFAULT 1,
+            custom_host    TEXT,
+            mainwp_site_id INTEGER,
+            status         TEXT NOT NULL DEFAULT 'active',
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL
+        );
+
+        -- Per-checklist step values
+        CREATE TABLE IF NOT EXISTS onboarding_checklist_data (
+            checklist_id INTEGER NOT NULL,
+            step_id      TEXT NOT NULL,
+            value        TEXT,
+            completed_at TEXT,
+            PRIMARY KEY (checklist_id, step_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_obc_data_checklist
+            ON onboarding_checklist_data(checklist_id);
     """)
     conn.commit()
 
@@ -1280,3 +1306,145 @@ def get_heartbeat_history_for_site(site_id) -> list:
         (int(site_id),)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ─── Onboarding Checklists ─────────────────────────────────────
+
+
+def create_checklist(client_name: str, site_url: str, is_new_client: bool,
+                     is_redesign: bool, is_new_site: bool, custom_host: str) -> int:
+    """Create a new onboarding checklist instance. Returns new id."""
+    now = datetime.now().isoformat()
+    conn = _get_conn()
+    cur = conn.execute(
+        """INSERT INTO onboarding_checklists
+           (client_name, site_url, is_new_client, is_redesign, is_new_site,
+            custom_host, status, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (client_name, site_url or "",
+         1 if is_new_client else 0,
+         1 if is_redesign else 0,
+         1 if is_new_site else 0,
+         custom_host or "",
+         "active", now, now)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_checklist(checklist_id: int, **kwargs) -> None:
+    """Update editable fields on a checklist (client_name, site_url, conditions, status)."""
+    allowed = {"client_name", "site_url", "is_new_client", "is_redesign",
+                "is_new_site", "custom_host", "status"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+    if not updates:
+        return
+    updates["updated_at"] = datetime.now().isoformat()
+    cols = ", ".join(f"{k}=?" for k in updates)
+    vals = list(updates.values()) + [checklist_id]
+    conn = _get_conn()
+    conn.execute(f"UPDATE onboarding_checklists SET {cols} WHERE id=?", vals)
+    conn.commit()
+
+
+def delete_checklist(checklist_id: int) -> None:
+    """Delete a checklist and all its step data."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM onboarding_checklist_data WHERE checklist_id=?", (checklist_id,))
+    conn.execute("DELETE FROM onboarding_checklists WHERE id=?", (checklist_id,))
+    conn.commit()
+
+
+def list_checklists(status: str = None) -> list:
+    """Return checklists, optionally filtered by status. Newest first."""
+    conn = _get_conn()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM onboarding_checklists WHERE status=? ORDER BY updated_at DESC",
+            (status,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM onboarding_checklists ORDER BY updated_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_checklist(checklist_id: int) -> dict | None:
+    """Return a single checklist row."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM onboarding_checklists WHERE id=?", (checklist_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def save_checklist_cell(checklist_id: int, step_id: str, value: str) -> None:
+    """Upsert a single step value; set completed_at for non-empty values."""
+    now = datetime.now().isoformat()
+    completed_at = now if value else None
+    conn = _get_conn()
+    conn.execute(
+        """INSERT INTO onboarding_checklist_data (checklist_id, step_id, value, completed_at)
+           VALUES (?,?,?,?)
+           ON CONFLICT(checklist_id, step_id) DO UPDATE SET
+               value=excluded.value, completed_at=excluded.completed_at""",
+        (checklist_id, step_id, value, completed_at)
+    )
+    conn.execute(
+        "UPDATE onboarding_checklists SET updated_at=? WHERE id=?", (now, checklist_id)
+    )
+    conn.commit()
+
+
+def get_checklist_data(checklist_id: int) -> dict:
+    """Return all saved step values as {step_id: {value, completed_at}}."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT step_id, value, completed_at FROM onboarding_checklist_data WHERE checklist_id=?",
+        (checklist_id,)
+    ).fetchall()
+    return {r["step_id"]: {"value": r["value"], "completed_at": r["completed_at"]} for r in rows}
+
+
+def link_checklist_to_mainwp(checklist_id: int, mainwp_site_id: int) -> None:
+    """
+    Link a checklist to a MainWP site and mirror step values that have a
+    target_field_id into onboarding_data for that site.
+    """
+    import checklist_csv as _csv
+    now = datetime.now().isoformat()
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE onboarding_checklists SET mainwp_site_id=?, updated_at=? WHERE id=?",
+        (mainwp_site_id, now, checklist_id)
+    )
+    conn.commit()
+
+    # Mirror values to onboarding_data where target_field_id is set
+    try:
+        template = _csv.load_checklist_template()
+    except Exception:
+        return  # CSV not yet present — skip mirror step
+
+    steps_with_target = {
+        s["id"]: s["target_field_id"]
+        for s in template["steps"]
+        if s.get("target_field_id")
+    }
+    checklist_data = get_checklist_data(checklist_id)
+    for step_id, target_field_id in steps_with_target.items():
+        if step_id in checklist_data:
+            save_onboarding_cell(mainwp_site_id, target_field_id,
+                                 checklist_data[step_id]["value"])
+
+
+def unlink_checklist(checklist_id: int) -> None:
+    """Remove the MainWP site link from a checklist."""
+    now = datetime.now().isoformat()
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE onboarding_checklists SET mainwp_site_id=NULL, updated_at=? WHERE id=?",
+        (now, checklist_id)
+    )
+    conn.commit()

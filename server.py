@@ -42,12 +42,14 @@ from routes.regression import RegressionMixin
 from routes.linkcheck import LinkCheckMixin
 from routes.onboarding import OnboardingMixin
 from routes.heartbeat import HeartbeatMixin
+from routes.checklists import ChecklistsMixin
 
 from config import (
     load_config, config_exists,
     load_session, clear_session, session_exists,
 )
 from db import init_db, get_history_stats
+import checklist_csv as _checklist_csv
 from regression import init_regression
 
 PORT = 9111
@@ -57,7 +59,7 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 class DashboardHandler(
     AuthMixin, UptimeMixin, CloudflareMixin,
     MainWPMixin, SitesMixin, RegressionMixin, LinkCheckMixin,
-    OnboardingMixin, HeartbeatMixin,
+    OnboardingMixin, HeartbeatMixin, ChecklistsMixin,
     SimpleHTTPRequestHandler,
 ):
     """Serves static files and handles API proxy routes."""
@@ -169,6 +171,16 @@ class DashboardHandler(
         elif path.startswith("/api/heartbeat/site/") and path.endswith("/history"):
             site_id = path.split("/")[-2]
             self._heartbeat_site_history(site_id)
+        elif path == "/api/checklists/template":
+            self._checklist_template()
+        elif path == "/api/checklists/available-sites":
+            self._checklist_available_sites()
+        elif path == "/api/checklists":
+            self._list_checklists(parse_qs(parsed.query) if parsed.query else None)
+        elif path.startswith("/api/checklists/") and not path.endswith("/cell") \
+                and not path.endswith("/link") and not path.endswith("/unlink"):
+            checklist_id = path.split("/")[-1]
+            self._get_checklist(checklist_id)
         elif path == "/api/logs":
             with routes._logs_lock:
                 self._json_response(list(routes._logs))
@@ -208,6 +220,17 @@ class DashboardHandler(
             self._start_heartbeat_run(body)
         elif path == "/api/heartbeat/cancel":
             self._cancel_heartbeat_run()
+        elif path == "/api/checklists":
+            self._create_checklist(body)
+        elif path.startswith("/api/checklists/") and path.endswith("/cell"):
+            checklist_id = path.split("/")[-2]
+            self._save_checklist_cell(checklist_id, body)
+        elif path.startswith("/api/checklists/") and path.endswith("/link"):
+            checklist_id = path.split("/")[-2]
+            self._link_checklist(checklist_id, body)
+        elif path.startswith("/api/checklists/") and path.endswith("/unlink"):
+            checklist_id = path.split("/")[-2]
+            self._unlink_checklist(checklist_id)
         else:
             self._json_response({"error": "Not found"}, 404)
 
@@ -219,6 +242,9 @@ class DashboardHandler(
         if path.startswith("/api/onboarding/fields/"):
             fid = path.split("/")[-1]
             self._update_onboarding_field(fid, body)
+        elif path.startswith("/api/checklists/"):
+            checklist_id = path.split("/")[-1]
+            self._update_checklist(checklist_id, body)
         else:
             self._json_response({"error": "Not found"}, 404)
 
@@ -232,6 +258,9 @@ class DashboardHandler(
         elif path.startswith("/api/onboarding/fields/"):
             fid = path.split("/")[-1]
             self._delete_onboarding_field(fid)
+        elif path.startswith("/api/checklists/"):
+            checklist_id = path.split("/")[-1]
+            self._delete_checklist(checklist_id)
         else:
             self._json_response({"error": "Not found"}, 404)
 
@@ -287,6 +316,12 @@ def main():
             add_log("DB", "info", "Database ready — no records yet")
     except Exception as e:
         add_log("DB", "warn", f"DB init failed: {e}")
+
+    # Bootstrap checklist CSV from DB if not present
+    try:
+        _checklist_csv.bootstrap_if_missing()
+    except Exception as e:
+        add_log("Checklists", "warn", f"Could not bootstrap checklist CSV: {e}")
 
     # Try auto-unlock from saved session
     saved_pass = load_session()
