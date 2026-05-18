@@ -549,16 +549,16 @@
         /* ── Onboarding Table ───────────────────────────────────── */
         .ob-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
         .ob-toolbar .ob-spacer { flex: 1; }
-        .ob-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+        .ob-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 130px); border: 1px solid var(--border); border-radius: 10px; }
         .ob-table { border-collapse: collapse; min-width: 100%; font-size: 13px; }
         .ob-table th, .ob-table td { padding: 8px 12px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); white-space: nowrap; }
         .ob-table th:last-child, .ob-table td:last-child { border-right: none; }
         .ob-table tbody tr:last-child td { border-bottom: none; }
         .ob-table thead tr:last-child th { border-bottom: 2px solid var(--border); }
-        .ob-group-header th { background: var(--surface-2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; text-align: center; padding: 5px 12px; cursor: pointer; }
-        .ob-group-header th:first-child, .ob-group-header th:nth-child(2) { background: var(--surface); }
-        .ob-col-header { background: var(--surface); font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; position: sticky; top: 0; z-index: 1; }
-        .ob-col-header.ob-sticky-col { background: var(--surface); z-index: 2; }
+        .ob-group-header th { background: var(--surface-2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; text-align: center; padding: 5px 12px; cursor: pointer; position: sticky; top: 0; z-index: 3; }
+        .ob-group-header th:first-child, .ob-group-header th:nth-child(2) { background: var(--surface); z-index: 4; }
+        .ob-col-header { background: var(--surface); font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; position: sticky; top: 29px; z-index: 2; }
+        .ob-col-header.ob-sticky-col { background: var(--surface); z-index: 4; }
         .ob-sticky-num { position: sticky; left: 0; background: var(--surface); z-index: 1; width: 36px; min-width: 36px; text-align: center; color: var(--text-muted); font-size: 12px; }
         .ob-sticky-name { position: sticky; left: 36px; background: var(--surface); z-index: 1; font-weight: 500; min-width: 160px; }
         .ob-table tbody tr:hover td { background: var(--surface-2); }
@@ -1687,7 +1687,14 @@
         // ============================================================================
         // API Calls
         // ============================================================================
-        async function apiCall(endpoint, options = {}) {
+        async function apiCall(endpoint, methodOrOptions = {}, body = undefined) {
+            let options;
+            if (typeof methodOrOptions === 'string') {
+                options = { method: methodOrOptions };
+                if (body !== undefined) options.body = JSON.stringify(body);
+            } else {
+                options = methodOrOptions;
+            }
             try {
                 const response = await fetch(`${CONFIG.API_BASE}api${endpoint}`, {
                     headers: { 'Content-Type': 'application/json' },
@@ -6600,6 +6607,13 @@
                     </thead>
                     <tbody>${bodyRows}</tbody>
                 </table>`;
+
+            // Set row-2 sticky top to match actual row-1 height
+            const groupRow = document.querySelector('#obTableContainer .ob-group-header');
+            if (groupRow) {
+                const h = groupRow.offsetHeight + 'px';
+                document.querySelectorAll('#obTableContainer .ob-col-header').forEach(th => th.style.top = h);
+            }
 
             // Apply locked state (editing off by default; survives re-renders)
             if (!document.getElementById('obEditCheck').checked) {
