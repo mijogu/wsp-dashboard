@@ -347,6 +347,31 @@ SELECT site_name, COUNT(*) AS updates FROM update_history GROUP BY site_name ORD
 | `/api/regression/baseline/{result_id}` | POST | Set a result's screenshot as the baseline for that site+page |
 | `/api/sites/config/{site_id}`        | GET    | Get per-site configuration |
 | `/api/sites/config/{site_id}`        | POST   | Save per-site configuration |
+| `/api/linkcheck/status`              | GET    | Broken-link checker availability + active run progress |
+| `/api/linkcheck/site-status`         | GET    | Per-site broken-link summary (latest run) |
+| `/api/linkcheck/site/{id}/history`   | GET    | Broken-link history for a site |
+| `/api/linkcheck/runs`                | GET    | List of all link-check runs |
+| `/api/linkcheck/latest`              | GET    | Most recent completed link-check run |
+| `/api/linkcheck/results/{run_id}`    | GET    | Results for a specific run |
+| `/api/linkcheck/results/{run_id}/site/{site_id}` | GET | Broken links for one site in one run |
+| `/api/linkcheck/run`                 | POST   | Start a new link-check run |
+| `/api/linkcheck/cancel`              | POST   | Cancel the active link-check run |
+| `/api/heartbeat/status`              | GET    | Heartbeat scan availability + active run progress |
+| `/api/heartbeat/runs`                | GET    | List of all heartbeat runs |
+| `/api/heartbeat/results/{run_id}`    | GET    | Results for a specific heartbeat run |
+| `/api/heartbeat/site/{id}/latest`    | GET    | Latest heartbeat result for a site |
+| `/api/heartbeat/site/{id}/history`   | GET    | Heartbeat history for a site |
+| `/api/heartbeat/run`                 | POST   | Start a new heartbeat scan |
+| `/api/heartbeat/cancel`              | POST   | Cancel the active heartbeat scan |
+| `/api/onboarding/fields`             | GET/POST/PUT/DELETE | Manage onboarding field definitions |
+| `/api/onboarding/data`               | GET/POST | Get/save per-site onboarding field values |
+| `/api/checklists`                    | GET/POST | List / create client onboarding checklists |
+| `/api/checklists/template`           | GET    | Checklist step template (sections + steps) |
+| `/api/checklists/available-sites`    | GET    | Sites eligible to link to a checklist |
+| `/api/checklists/{id}`               | GET/DELETE | Get / delete a checklist |
+| `/api/checklists/{id}/cell`          | POST   | Save one checklist step's value |
+| `/api/checklists/{id}/link`          | POST   | Link a checklist to a live site |
+| `/api/checklists/{id}/unlink`        | POST   | Unlink a checklist from its site |
 
 ---
 
@@ -551,11 +576,17 @@ Each test gets an isolated temp database / config file; nothing touches `dashboa
 
 | File              | Purpose                                      |
 |-------------------|----------------------------------------------|
-| `server.py`       | Python HTTP server, API proxy, logging        |
+| `server.py`       | Thin HTTP dispatcher — mixes in `routes/*.py` handlers |
+| `routes/`         | Route handlers by feature (sites, regression, linkcheck, onboarding, heartbeat, checklists, mainwp, cloudflare, uptime, auth) |
 | `config.py`       | AES-256-GCM encrypted config manager          |
 | `db.py`           | SQLite persistence layer                      |
 | `regression.py`   | Playwright-based regression checker (Layer 1 + Layer 2) |
-| `static/index.html` | Dashboard frontend (single-file)           |
+| `link_checker.py` | Broken-link checker                           |
+| `heartbeat.py`    | Site heartbeat scans                          |
+| `checklist_csv.py`| Onboarding checklist template CSV import/export |
+| `static/index.html` | Dashboard frontend — HTML shell (markup only) |
+| `static/css/app.css` | All frontend styling                       |
+| `static/js/`      | Frontend logic — one ES module per feature tab, no build step. Debug tracing: `?debug` URL param or `localStorage.wsp_debug=1` |
 | `requirements.txt`| Python dependencies                           |
 | `config.enc`      | Encrypted API keys (gitignored)               |
 | `.session`        | Saved session for auto-unlock (gitignored)    |
@@ -565,6 +596,8 @@ Each test gets an isolated temp database / config file; nothing touches `dashboa
 | `ROADMAP.md`      | Phased development plan                       |
 | `WISHLIST.md`     | Parked feature ideas for later                |
 | `tests/`          | Unit test suite (6 files)                     |
+
+**Note:** the Downtime Log tab was removed (2026-07-08) as part of the frontend module split — no longer part of the UI.
 
 ---
 

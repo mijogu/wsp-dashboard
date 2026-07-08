@@ -6,7 +6,7 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 
 ---
 
-## Current State (as of 2026-04-22)
+## Current State (as of 2026-07-08)
 
 **Shipped:**
 - Core proxy infrastructure (MainWP, Uptime Robot, Cloudflare)
@@ -22,13 +22,17 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 - Site Dashboards — per-site summary view (heartbeat, regression, link check, update history)
 - Cloudflare settings comparison table (transposed, sortable across zones)
 - Onboarding screen — collapsible field groups, inline editing, sticky columns
+- Client Site Checklist onboarding tracker (step-by-step, per-client)
 - `server.py` split into route modules under `routes/` (~12 KB thin dispatcher)
 - `CLAUDE.md` project context file
 - Hash-based URL routing — refresh-persistent deep links for all tabs, sub-views, and record IDs
+- **Frontend ES-module split** — `static/index.html`'s 7,456-line inline `<script>` and `<style>` split into `static/js/*.js` (one module per feature tab, native ES modules, no build step) and `static/css/app.css`; `index.html` is now a 918-line markup shell
+- **Client-side debug/wiring logging** — `?debug` / `localStorage.wsp_debug` enables route + module-load tracing; wiring failures (missing route handler, missing DOM element, uncaught route error) always surface via the on-screen log panel, regardless of the debug flag
+- Downtime Log tab removed (unused, no plans to revisit)
 
 ---
 
-## Phase 0 — Documentation, Refactor & UX Cleanup ✓ (mostly done)
+## Phase 0 — Documentation, Refactor & UX Cleanup ✓ Done
 
 **Goal:** Get the codebase and docs in order before adding any new features.
 
@@ -38,8 +42,8 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 
 *Documentation:*
 - [x] Create `CLAUDE.md` — project context for Claude Code sessions
-- [ ] Update `RUNBOOK.md` — Layer 2 visual diff, per-site config, new API endpoints, correct test count (6 files, not 2)
-- [ ] Add Pillow troubleshooting note to RUNBOOK (visual diff not showing → `pip install Pillow`)
+- [x] Update `RUNBOOK.md` — Layer 2 visual diff, per-site config, new API endpoints, correct test count (6 files)
+- [x] Add Pillow troubleshooting note to RUNBOOK (visual diff not showing → `pip install Pillow`)
 
 *Refactor:*
 - [x] Split `server.py` into route modules under `routes/` — now a ~12 KB thin dispatcher
@@ -50,9 +54,27 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 
 **Done criteria:** CLAUDE.md and updated RUNBOOK exist; `server.py` is split into modules with all tests passing; regression default view is site-centric.
 
-**Remaining:** RUNBOOK update.
-
 **Dependencies:** None — do this first.
+
+---
+
+## Phase 0.5 — Frontend ES-Module Split ✓ Done
+
+**Goal:** `static/index.html`'s 7,456-line inline `<script>` had become the main source of slow, token-heavy Claude Code sessions on this project — any frontend task required loading/searching the whole file. Split it into maintainable, independently-editable pieces before doing more frontend work.
+
+**Complexity:** M
+
+**Tasks:**
+- [x] Split the inline `<script>` into `static/js/*.js` — one module per feature tab (`overview.js`, `uptime.js`, `cloudflare.js`, `mainwp.js`, `history.js`, `regression.js`, `sites.js`, `linkcheck.js`, `onboarding.js`, `checklists.js`) plus shared core modules (`state.js`, `api.js`, `dom.js`, `debug.js`, `router.js`, `logpanel.js`) and an `app.js` entry point
+- [x] Route registry pattern in `router.js` — each feature module registers its own hash-route handler on import, avoiding import cycles between features
+- [x] Client-side debug/wiring logging (`debug.js`) — `?debug`/`wsp_debug` tracing, wiring-audit at boot (checks every tab has a registered route + matching DOM element), global `error`/`unhandledrejection` capture — all surfaced in the existing on-screen log panel
+- [x] Extract the 728-line `<style>` block into `static/css/app.css`
+- [x] Remove the unused Downtime Log tab
+- [x] Update `CLAUDE.md` / `RUNBOOK.md` for the new file layout
+
+**Done criteria:** `index.html` is markup-only; every tab click-tested with a clean console; wiring audit passes; no behavior change from the pre-split app.
+
+**Dependencies:** Phase 0.
 
 ---
 
@@ -214,7 +236,8 @@ The **WISHLIST.md** file is the parking lot for ideas. This ROADMAP is the prior
 
 | Phase | What it delivers | Complexity | Status |
 |-------|-----------------|------------|--------|
-| 0 | Docs, refactor, UX fix, URL routing | M | ✓ Mostly done (RUNBOOK pending) |
+| 0 | Docs, refactor, UX fix, URL routing | M | ✓ Done |
+| 0.5 | Frontend ES-module split + debug logging | M | ✓ Done |
 | 1 | Broken link checker | M | ✓ Done |
 | 2 | Client tagging + filtered views | M | Not started |
 | 3 | URL snapshot + change tracking | M | Not started |
