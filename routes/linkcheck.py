@@ -134,7 +134,8 @@ class LinkCheckMixin:
                 return
 
         site_configs = get_all_site_configs()
-        run_id = create_link_check_run()
+        run_id = create_link_check_run(
+            check_internal=bool(check_internal), check_external=bool(check_external))
         update_link_check_run_totals(run_id, len(sites))
 
         t = threading.Thread(

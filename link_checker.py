@@ -450,9 +450,16 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                        f"  {site_name}: {len(link_meta) - site_external_count} internal, "
                        f"{site_external_count} external — checking {len(to_check)}")
 
+            # Split the checked set by scope up front — to_check's composition
+            # doesn't change during checking, so this is stable.
+            site_internal_checked = sum(1 for m in to_check.values() if not m["is_external"])
+            site_external_checked = sum(1 for m in to_check.values() if m["is_external"])
+
             # Phase 3 — check links concurrently
-            site_broken    = 0
-            site_redirects = 0
+            site_broken          = 0
+            site_internal_broken = 0
+            site_external_broken = 0
+            site_redirects       = 0
             with ThreadPoolExecutor(max_workers=LINK_CHECK_WORKERS) as pool:
                 futures = {
                     pool.submit(_check_link, url, session): url
@@ -486,6 +493,10 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
 
                     if check["is_broken"]:
                         site_broken += 1
+                        if is_ext:
+                            site_external_broken += 1
+                        else:
+                            site_internal_broken += 1
                         total_broken += 1
                         _active_check["broken_links"] = total_broken
 
@@ -512,6 +523,10 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                         external_count=site_external_count,
                         redirect_count=site_redirects,
                         image_link_count=site_image_count,
+                        internal_checked_count=site_internal_checked,
+                        internal_broken_count=site_internal_broken,
+                        external_checked_count=site_external_checked,
+                        external_broken_count=site_external_broken,
                     )
                 except Exception:
                     pass

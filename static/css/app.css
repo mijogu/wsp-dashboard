@@ -537,6 +537,21 @@
         }
         .lc-badge-internal { background: var(--accent-glow); color: var(--accent); }
         .lc-badge-external { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+        /* Grouped Internal/External column headers */
+        .lc-group-header th {
+            text-align: center; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+            color: var(--text-muted); font-weight: 600; padding: 4px 8px 2px; border-bottom: none;
+        }
+        /* Broken-link detail table (inside .lc-expand-cell) */
+        /* table-layout:fixed avoids pathological column-width collapse with
+           word-break:break-all URL content (see lcBrokenLinksHtml). */
+        .lc-detail-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; background: var(--surface-2); }
+        .lc-detail-table th {
+            text-align: left; padding: 6px 14px; font-size: 10px; text-transform: uppercase;
+            letter-spacing: 0.5px; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border);
+        }
+        .lc-detail-table td { padding: 6px 14px; border-bottom: 1px solid var(--border); overflow-wrap: break-word; }
+        .lc-detail-table tr:last-child td { border-bottom: none; }
 
         /* ── Onboarding Table ───────────────────────────────────── */
         .ob-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }

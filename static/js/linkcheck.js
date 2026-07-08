@@ -166,6 +166,46 @@ dbg('module', 'linkcheck.js loaded');
 
         // ── LC sort helpers ───────────────────────────────────────────────────────
 
+        // ── Internal/External scope helpers ──────────────────────────────────────
+        // Shared by all three site-overview tables (Sites/Runs/History), which all
+        // now carry the same internal_*/external_*/check_internal/check_external
+        // fields from the DB (see db.py get_link_check_site_status/_site_history/
+        // _results_for_run).
+        function _lcScopeCounts(row) {
+            const intChecked = row.internal_checked_count ?? 0;
+            const intBroken  = row.internal_broken_count  ?? 0;
+            const extChecked = row.external_checked_count ?? 0;
+            const extBroken  = row.external_broken_count  ?? 0;
+            return {
+                intChecked, intBroken, intWorking: intChecked - intBroken,
+                extChecked, extBroken, extWorking: extChecked - extBroken,
+                intWasChecked: !!row.check_internal,
+                extWasChecked: !!row.check_external,
+            };
+        }
+
+        // Extracts the numeric value for a given scope-column sort key from a
+        // row (or its statusById-looked-up counterpart). Returns null if the
+        // scope wasn't checked for that run — sorts to the bottom.
+        function _lcScopeSortValue(row, col) {
+            if (!row) return null;
+            const c = _lcScopeCounts(row);
+            switch (col) {
+                case 'int_links':   return c.intWasChecked ? c.intChecked : null;
+                case 'int_working': return c.intWasChecked ? c.intWorking : null;
+                case 'int_broken':  return c.intWasChecked ? c.intBroken  : null;
+                case 'ext_links':   return c.extWasChecked ? c.extChecked : null;
+                case 'ext_working': return c.extWasChecked ? c.extWorking : null;
+                case 'ext_broken':  return c.extWasChecked ? c.extBroken  : null;
+                default: return undefined; // not a scope column
+            }
+        }
+
+        const _LC_SCOPE_SORT_COLS = new Set([
+            'int_links', 'int_working', 'int_broken',
+            'ext_links', 'ext_working', 'ext_broken',
+        ]);
+
         function _sortLcSites(sites, statusById) {
             const { col, dir } = _lcSiteSort;
             if (!col) return sites;
@@ -173,7 +213,10 @@ dbg('module', 'linkcheck.js loaded');
                 const sa = statusById[String(a.id)] || {};
                 const sb = statusById[String(b.id)] || {};
                 let av, bv;
-                switch (col) {
+                if (_LC_SCOPE_SORT_COLS.has(col)) {
+                    av = _lcScopeSortValue(sa, col); bv = _lcScopeSortValue(sb, col);
+                    av = av ?? -1; bv = bv ?? -1;
+                } else switch (col) {
                     case 'site':    av = (a.name || '').toLowerCase(); bv = (b.name || '').toLowerCase(); break;
                     case 'checked': av = sa.run_started_at || ''; bv = sb.run_started_at || ''; break;
                     case 'links':   av = sa.links_checked  ?? -1; bv = sb.links_checked  ?? -1; break;
@@ -191,7 +234,10 @@ dbg('module', 'linkcheck.js loaded');
             if (!col) return sites;
             return [...sites].sort((a, b) => {
                 let av, bv;
-                switch (col) {
+                if (_LC_SCOPE_SORT_COLS.has(col)) {
+                    av = _lcScopeSortValue(a, col); bv = _lcScopeSortValue(b, col);
+                    av = av ?? -1; bv = bv ?? -1;
+                } else switch (col) {
                     case 'site':    av = (a.site_name || '').toLowerCase(); bv = (b.site_name || '').toLowerCase(); break;
                     case 'links':   av = a.links_checked ?? -1; bv = b.links_checked ?? -1; break;
                     case 'working': av = (a.links_checked ?? 0) - (a.broken_count ?? 0);
@@ -208,7 +254,10 @@ dbg('module', 'linkcheck.js loaded');
             if (!col) return rows;
             return [...rows].sort((a, b) => {
                 let av, bv;
-                switch (col) {
+                if (_LC_SCOPE_SORT_COLS.has(col)) {
+                    av = _lcScopeSortValue(a, col); bv = _lcScopeSortValue(b, col);
+                    av = av ?? -1; bv = bv ?? -1;
+                } else switch (col) {
                     case 'date':    av = a.started_at || ''; bv = b.started_at || ''; break;
                     case 'links':   av = a.links_checked ?? -1; bv = b.links_checked ?? -1; break;
                     case 'working': av = (a.links_checked ?? 0) - (a.broken_count ?? 0);
@@ -220,29 +269,110 @@ dbg('module', 'linkcheck.js loaded');
             });
         }
 
+        // Renders the 6 scope-split <td> cells (Internal Links/Working/Broken,
+        // External Links/Working/Broken) shared by all three site-overview tables.
+        function _lcScopeCellsHtml(row) {
+            const c = _lcScopeCounts(row);
+            const dash = `<td style="text-align:right; font-size:13px; color:var(--text-muted);">—</td>`;
+            const cell = (checked, working, broken, wasChecked) => {
+                if (!wasChecked) return dash + dash + dash;
+                const brokenHtml = broken > 0
+                    ? `<span style="color:var(--red); font-weight:600;">${broken.toLocaleString()}</span>`
+                    : `<span style="color:var(--green);">0</span>`;
+                const workingHtml = `<span style="color:${working === checked ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`;
+                return `<td style="text-align:right; font-size:13px;">${checked.toLocaleString()}</td>`
+                     + `<td style="text-align:right; font-size:13px;">${workingHtml}</td>`
+                     + `<td style="text-align:right; font-size:13px;">${brokenHtml}</td>`;
+            };
+            return cell(c.intChecked, c.intWorking, c.intBroken, c.intWasChecked)
+                 + cell(c.extChecked, c.extWorking, c.extBroken, c.extWasChecked);
+        }
+
+        // Two-row grouped <thead> shared by all three site-overview tables.
+        // `leadCells` is the HTML for the leading (non-scope) header cells,
+        // e.g. Status+Site+Last Checked, or Status+Site, or Status+Date.
+        function _lcScopeTheadHtml(leadCellsHtml, leadColspan, sortState) {
+            return `<tr class="lc-group-header">
+                    <th colspan="${leadColspan}"></th>
+                    <th colspan="3" style="text-align:center;">Internal</th>
+                    <th colspan="3" style="text-align:center;">External</th>
+                </tr>
+                <tr>
+                    ${leadCellsHtml}
+                    ${_sortTh('Links', 'int_links', sortState, 'text-align:right; width:70px;')}
+                    ${_sortTh('Working', 'int_working', sortState, 'text-align:right; width:70px;')}
+                    ${_sortTh('Broken', 'int_broken', sortState, 'text-align:right; width:70px;')}
+                    ${_sortTh('Links', 'ext_links', sortState, 'text-align:right; width:70px;')}
+                    ${_sortTh('Working', 'ext_working', sortState, 'text-align:right; width:70px;')}
+                    ${_sortTh('Broken', 'ext_broken', sortState, 'text-align:right; width:70px;')}
+                </tr>`;
+        }
+
+        // Wires click-to-sort on a thead's sortable columns (toggle direction on
+        // repeat click of the same column) and re-renders via `rerender`. Shared
+        // by all three site-overview tables — previously copy-pasted 3×.
+        function _lcWireSortHeaders(thead, sortState, rerender) {
+            thead.querySelectorAll('th[data-sort-col]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const col = th.dataset.sortCol;
+                    if (sortState.col === col) sortState.dir *= -1;
+                    else { sortState.col = col; sortState.dir = 1; }
+                    rerender();
+                });
+            });
+        }
+
+        // Status icon shared by all three tables. `hasRun` is only ever false in
+        // the Sites view, for a site that's never had a link check run.
+        function _lcStatusIcon(broken, hasRun = true) {
+            if (!hasRun) return `<span style="color:var(--text-muted);">—</span>`;
+            return broken > 0
+                ? `<span style="color:var(--red);">⚠</span>`
+                : `<span style="color:var(--green);">✓</span>`;
+        }
+
+        // Strips protocol + trailing slash for compact domain display — used by
+        // every table row, the history panel header, and the site-select list.
+        function _lcDomain(url) {
+            return (url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+        }
+
+        // Toggles an expand row's visibility and its trigger row's arrow
+        // indicator together. Returns whether the row is now open.
+        function _lcToggleExpand(expandEl, arrowEl) {
+            const isOpen = expandEl.classList.toggle('open');
+            if (arrowEl) arrowEl.textContent = isOpen ? '▲' : '▼';
+            return isOpen;
+        }
+
+        // Writes the 4 summary cards (Sites/Pages/Links/Broken), including the
+        // red/green broken-count coloring — shared by the Runs view, Sites view,
+        // and in-progress run display, which previously each duplicated this.
+        function _lcSetSummaryCards({ sites, pages, links, broken }) {
+            document.getElementById('lcStatSites').textContent = sites ?? '—';
+            if (pages !== undefined) {
+                document.getElementById('lcStatPages').textContent = pages.toLocaleString();
+            }
+            document.getElementById('lcStatLinks').textContent = (links ?? 0).toLocaleString();
+            const el = document.getElementById('lcStatBroken');
+            el.textContent = (broken ?? 0).toLocaleString();
+            el.style.color = (broken ?? 0) > 0 ? 'var(--red)' : 'var(--green)';
+            document.getElementById('lcSummary').style.display = '';
+        }
+
         function renderLcSiteStatusTable(statusById) {
             _lcLastSiteStatusData = statusById; // snapshot for CSV export
             const body = document.getElementById('lcBody');
             const empty = document.getElementById('lcEmpty');
 
-            // Generate sortable thead
+            // Generate sortable thead (grouped Internal/External columns)
             const thead = document.getElementById('lcThead');
-            thead.innerHTML = `<tr>
+            thead.innerHTML = _lcScopeTheadHtml(`
                 <th style="width:40px;">Status</th>
                 ${_sortTh('Site', 'site', _lcSiteSort)}
                 ${_sortTh('Last Checked', 'checked', _lcSiteSort, 'width:130px;')}
-                ${_sortTh('Links', 'links', _lcSiteSort, 'text-align:right; width:80px;')}
-                ${_sortTh('Working', 'working', _lcSiteSort, 'text-align:right; width:80px;')}
-                ${_sortTh('Broken', 'broken', _lcSiteSort, 'text-align:right; width:80px;')}
-            </tr>`;
-            thead.querySelectorAll('th[data-sort-col]').forEach(th => {
-                th.addEventListener('click', () => {
-                    const col = th.dataset.sortCol;
-                    if (_lcSiteSort.col === col) _lcSiteSort.dir *= -1;
-                    else { _lcSiteSort.col = col; _lcSiteSort.dir = 1; }
-                    renderLcSiteStatusTable(_lcLastSiteStatusData);
-                });
-            });
+            `, 3, _lcSiteSort);
+            _lcWireSortHeaders(thead, _lcSiteSort, () => renderLcSiteStatusTable(_lcLastSiteStatusData));
 
             const activeSites = _sortLcSites(_lcSiteList.filter(s => !s.is_removed), statusById);
             if (!activeSites.length && !Object.keys(statusById).length) {
@@ -255,28 +385,9 @@ dbg('module', 'linkcheck.js loaded');
 
             const rows = activeSites.map(site => {
                 const st = statusById[String(site.id)];
-                const hasRun     = !!st;
-                const total      = st ? (st.links_checked  ?? 0) : null;
-                const broken     = st ? (st.broken_count   ?? 0) : null;
-                const working    = (total !== null && broken !== null) ? (total - broken) : null;
-                const prevBroken = st?.prev_broken_count  ?? null;
-                const prevLinks  = st?.prev_links_checked ?? null;
-                const prevWorking = (prevLinks !== null && prevBroken !== null) ? prevLinks - prevBroken : null;
-
-                const icon = !hasRun ? `<span style="color:var(--text-muted);">—</span>`
-                    : broken > 0     ? `<span style="color:var(--red);">⚠</span>`
-                                     : `<span style="color:var(--green);">✓</span>`;
-
-                const fmt = n => n === null ? `<span style="color:var(--text-muted);">—</span>`
-                                            : n.toLocaleString();
-                const brokenCell = broken === null ? fmt(null)
-                    : (broken > 0
-                        ? `<span style="color:var(--red); font-weight:600;">${broken.toLocaleString()}</span>`
-                        : `<span style="color:var(--green);">0</span>`)
-                      + lcDeltaBadge(broken, prevBroken, true);
-                const workingCell = working === null ? fmt(null)
-                    : `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`
-                      + lcDeltaBadge(working, prevWorking, false);
+                const hasRun = !!st;
+                const broken = st ? (st.broken_count ?? 0) : null;
+                const icon = _lcStatusIcon(broken, hasRun);
 
                 let lastChecked = '—';
                 if (st?.run_started_at) {
@@ -287,7 +398,7 @@ dbg('module', 'linkcheck.js loaded');
                     else lastChecked = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 }
 
-                const domain = (site.url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+                const domain = _lcDomain(site.url);
                 const rowBg  = (broken ?? 0) > 0 ? 'background:var(--yellow-bg);' : '';
 
                 return `<tr style="cursor:pointer; ${rowBg}"
@@ -300,9 +411,7 @@ dbg('module', 'linkcheck.js loaded');
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(domain)}</div>
                     </td>
                     <td style="font-size:12px; color:var(--text-muted);">${lastChecked}</td>
-                    <td style="text-align:right; font-size:13px;">${fmt(total)}</td>
-                    <td style="text-align:right; font-size:13px;">${workingCell}</td>
-                    <td style="text-align:right; font-size:13px;">${brokenCell}</td>
+                    ${_lcScopeCellsHtml(st || {})}
                 </tr>`;
             });
 
@@ -322,8 +431,7 @@ dbg('module', 'linkcheck.js loaded');
             document.getElementById('lcSummary').style.display = 'none';
             document.getElementById('lcSiteHistoryPanel').style.display = '';
             document.getElementById('lcSiteHistoryTitle').textContent = siteName || '';
-            document.getElementById('lcSiteHistoryUrl').textContent =
-                (siteUrl || '').replace(/^https?:\/\//, '');
+            document.getElementById('lcSiteHistoryUrl').textContent = _lcDomain(siteUrl);
             loadLcSiteHistory(siteId);
         }
 
@@ -363,25 +471,16 @@ dbg('module', 'linkcheck.js loaded');
             const t = target || { tbodyId: 'lcSiteHistoryBody', theadId: 'lcSiteHistoryThead', emptyId: 'lcSiteHistoryEmpty' };
             const tbody = document.getElementById(t.tbodyId);
             const empty = document.getElementById(t.emptyId);
-            const COLS  = 5;
+            const COLS  = 8; // status + date + 3 internal + 3 external
 
-            // Generate sortable thead
+            // Generate sortable thead (grouped Internal/External columns)
             const thead = document.getElementById(t.theadId);
-            thead.innerHTML = `<tr>
+            thead.innerHTML = _lcScopeTheadHtml(`
                 <th style="width:40px;">Status</th>
                 ${_sortTh('Date', 'date', _lcHistorySort)}
-                ${_sortTh('Links', 'links', _lcHistorySort, 'text-align:right; width:80px;')}
-                ${_sortTh('Working', 'working', _lcHistorySort, 'text-align:right; width:80px;')}
-                ${_sortTh('Broken', 'broken', _lcHistorySort, 'text-align:right; width:80px;')}
-            </tr>`;
-            thead.querySelectorAll('th[data-sort-col]').forEach(th => {
-                th.addEventListener('click', () => {
-                    const col = th.dataset.sortCol;
-                    if (_lcHistorySort.col === col) _lcHistorySort.dir *= -1;
-                    else { _lcHistorySort.col = col; _lcHistorySort.dir = 1; }
-                    renderLcSiteHistoryBody(_lcLastHistoryData, _lcCurrentHistorySite.id, target);
-                });
-            });
+            `, 2, _lcHistorySort);
+            _lcWireSortHeaders(thead, _lcHistorySort,
+                () => renderLcSiteHistoryBody(_lcLastHistoryData, _lcCurrentHistorySite.id, target));
 
             if (!history.length) {
                 tbody.innerHTML = '';
@@ -398,35 +497,21 @@ dbg('module', 'linkcheck.js loaded');
                 const d = new Date((r.started_at || '') + 'Z');
                 const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                     + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-                const total      = r.links_checked  ?? 0;
-                const broken     = r.broken_count   ?? 0;
-                const working    = total - broken;
-                const prevBroken  = r.prev_broken_count  ?? null;
-                const prevLinks   = r.prev_links_checked ?? null;
-                const prevWorking = (prevLinks !== null && prevBroken !== null) ? prevLinks - prevBroken : null;
-
-                const icon = broken > 0
-                    ? `<span style="color:var(--red);">⚠</span>`
-                    : `<span style="color:var(--green);">✓</span>`;
-                const brokenCell = (broken > 0
-                    ? `<span style="color:var(--red); font-weight:600;">${broken}</span>`
-                    : `<span style="color:var(--green);">0</span>`)
-                    + lcDeltaBadge(broken, prevBroken, true);
-                const workingCell = `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`
-                    + lcDeltaBadge(working, prevWorking, false);
+                const broken = r.broken_count ?? 0;
+                const icon = _lcStatusIcon(broken);
                 const rowBg    = broken > 0 ? 'background:var(--yellow-bg);' : '';
                 const expandId = `lc-hist-expand-${r.run_id}`;
+                // Expand arrow lives with the status icon rather than a specific
+                // broken column, since Broken is now split into Internal/External.
                 const expandArrow = broken > 0
-                    ? `<span style="font-size:11px; color:var(--text-muted); margin-left:4px;">▼</span>`
+                    ? `<span class="lc-expand-arrow" style="font-size:11px; color:var(--text-muted); margin-left:4px;">▼</span>`
                     : '';
 
                 html += `<tr class="lc-site-row" style="cursor:${broken > 0 ? 'pointer' : 'default'}; ${rowBg}"
                         data-run-id="${r.run_id}" data-site-id="${escapeHtml(String(siteId))}" data-expand-id="${expandId}">
-                    <td style="text-align:center;">${icon}</td>
+                    <td style="text-align:center;">${icon}${expandArrow}</td>
                     <td style="font-size:13px;">${dateStr}</td>
-                    <td style="text-align:right;">${total.toLocaleString()}</td>
-                    <td style="text-align:right;">${workingCell}</td>
-                    <td style="text-align:right;">${brokenCell}${expandArrow}</td>
+                    ${_lcScopeCellsHtml(r)}
                 </tr>`;
 
                 if (broken > 0) {
@@ -449,11 +534,7 @@ dbg('module', 'linkcheck.js loaded');
                     const expandEl = document.getElementById(expandId);
                     if (!expandEl) return;
 
-                    const isOpen = expandEl.classList.toggle('open');
-                    const arrow  = row.querySelector('td:nth-child(5) span:last-child');
-                    if (arrow && arrow.textContent.trim().match(/[▼▲]/)) {
-                        arrow.textContent = isOpen ? ' ▲' : ' ▼';
-                    }
+                    const isOpen = _lcToggleExpand(expandEl, row.querySelector('.lc-expand-arrow'));
                     if (!isOpen) return;
 
                     // Lazy-load broken links + stats bar the first time
@@ -525,24 +606,6 @@ dbg('module', 'linkcheck.js loaded');
             }
         }
 
-        // ── Delta badge helper ────────────────────────────────────────────────────
-        /**
-         * Returns a small inline badge like "ꜛ4" or "ꜜ3" showing the change
-         * from prev to current.
-         * lowerIsBetter: true for Broken (a drop is green), false for Working.
-         * Returns '' when there's no previous data or no change.
-         */
-        function lcDeltaBadge(current, prev, lowerIsBetter) {
-            if (prev === null || prev === undefined) return '';
-            const delta = current - prev;
-            if (delta === 0) return '';
-            const up   = delta > 0;
-            const good = lowerIsBetter ? !up : up;
-            const color = good ? 'var(--green)' : 'var(--red)';
-            const arrow = up ? 'ꜛ' : 'ꜜ';
-            return `<span style="font-size:10px; color:${color}; margin-left:4px; font-weight:700; letter-spacing:0;">${arrow}${Math.abs(delta).toLocaleString()}</span>`;
-        }
-
         // ── Stats bar helper ──────────────────────────────────────────────────────
         /**
          * Renders a compact stats strip above the broken links list.
@@ -582,42 +645,60 @@ dbg('module', 'linkcheck.js loaded');
             </div>`;
         }
 
-        // ── Shared helper: render a list of broken link rows ─────────────────────
-        // Returns <div class="lc-broken-row"> elements — used inside a <td> wrapper,
-        // not directly as <tr> elements, avoiding the invalid nested-tbody pattern.
+        // ── Shared helper: render broken links as a real table ───────────────────
+        // Columns: Status | Scope (Internal/External + Image badge) | URL | Found On
+        // | Redirects To (omitted entirely when no link in the set has one, to
+        // avoid an all-dash column). Feeds both the Runs-view and History-view
+        // expand rows.
         function lcBrokenLinksHtml(links) {
             if (!links.length) {
                 return `<div class="lc-broken-row" style="text-align:center; color:var(--green);">
                     ✓ No broken links
                 </div>`;
             }
-            return links.map(link => {
-                const statusLabel = link.status_code
+            const shortUrl = (url, len) => (url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, len) || (url || '/');
+            const linkCell = (url, short) => `<a href="${escapeHtml(url || '#')}" target="_blank" rel="noopener"
+                style="color:var(--accent); font-size:12px; word-break:break-all;"
+                title="${escapeHtml(url || '')}">${escapeHtml(short)}</a>`;
+
+            const hasRedirects = links.some(l => l.redirect_url);
+
+            const rows = links.map(link => {
+                const statusCell = link.status_code
                     ? `<span style="font-weight:600; color:var(--red);">${link.status_code}</span>`
                     : `<span style="color:var(--text-muted);">${escapeHtml(link.error || 'Error')}</span>`;
-                const badge = link.is_external
+                const scopeBadge = link.is_external
                     ? `<span class="lc-badge lc-badge-external">External</span>`
                     : `<span class="lc-badge lc-badge-internal">Internal</span>`;
                 const imageBadge = link.is_image
                     ? `<span class="lc-badge" style="background:rgba(251,191,36,0.12); border-color:var(--yellow); color:var(--yellow);">Image</span>`
                     : '';
-                const srcShort  = (link.source_page || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 60) || '/';
-                const linkShort = (link.link_url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 80) || link.link_url;
-                return `<div class="lc-broken-row">
-                    <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;">
-                        ${statusLabel}
-                        ${badge}${imageBadge}
-                        <a href="${escapeHtml(link.link_url || '#')}" target="_blank" rel="noopener"
-                           style="color:var(--accent); font-size:12px; word-break:break-all;"
-                           title="${escapeHtml(link.link_url || '')}">${escapeHtml(linkShort)}</a>
-                    </div>
-                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                        Found on:
-                        <a href="${escapeHtml(link.source_page || '#')}" target="_blank" rel="noopener"
-                           style="color:var(--text-muted);">${escapeHtml(srcShort)}</a>
-                    </div>
-                </div>`;
+                const redirectCell = hasRedirects
+                    ? `<td>${link.redirect_url ? linkCell(link.redirect_url, shortUrl(link.redirect_url, 60)) : '<span style="color:var(--text-muted);">—</span>'}</td>`
+                    : '';
+                return `<tr>
+                    <td style="white-space:nowrap;">${statusCell}</td>
+                    <td style="white-space:nowrap;">${scopeBadge}${imageBadge}</td>
+                    <td>${linkCell(link.link_url, shortUrl(link.link_url, 80))}</td>
+                    <td>${linkCell(link.source_page, shortUrl(link.source_page, 60))}</td>
+                    ${redirectCell}
+                </tr>`;
             }).join('');
+
+            // table-layout:fixed with explicit widths — with table-layout:auto,
+            // word-break:break-all URL content causes pathological column-width
+            // collapse (long URLs squeeze to a few px while Status/Scope balloon).
+            const urlColWidth = hasRedirects ? '32%' : '38%';
+            return `<table class="lc-detail-table">
+                <thead><tr>
+                    <th style="width:64px;">Status</th>
+                    <th style="width:80px;">Scope</th>
+                    <th style="width:${urlColWidth};">URL</th>
+                    <th style="width:${urlColWidth};">Found On</th>
+                    ${hasRedirects ? '<th style="width:20%;">Redirects To</th>' : ''}
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
         }
 
         function renderLcRunsView(run) {
@@ -625,25 +706,15 @@ dbg('module', 'linkcheck.js loaded');
             const sites = run.sites || [];
             const body  = document.getElementById('lcBody');
             const empty = document.getElementById('lcEmpty');
-            const COLS  = 5; // status + site + links + broken + working
+            const COLS  = 8; // status + site + 3 internal + 3 external
 
-            // Generate sortable thead
+            // Generate sortable thead (grouped Internal/External columns)
             const thead = document.getElementById('lcThead');
-            thead.innerHTML = `<tr>
+            thead.innerHTML = _lcScopeTheadHtml(`
                 <th style="width:40px;">Status</th>
                 ${_sortTh('Site', 'site', _lcRunsSort)}
-                ${_sortTh('Links', 'links', _lcRunsSort, 'text-align:right; width:80px;')}
-                ${_sortTh('Working', 'working', _lcRunsSort, 'text-align:right; width:80px;')}
-                ${_sortTh('Broken', 'broken', _lcRunsSort, 'text-align:right; width:80px;')}
-            </tr>`;
-            thead.querySelectorAll('th[data-sort-col]').forEach(th => {
-                th.addEventListener('click', () => {
-                    const col = th.dataset.sortCol;
-                    if (_lcRunsSort.col === col) _lcRunsSort.dir *= -1;
-                    else { _lcRunsSort.col = col; _lcRunsSort.dir = 1; }
-                    renderLcRunsView(_lcLastRunData);
-                });
-            });
+            `, 2, _lcRunsSort);
+            _lcWireSortHeaders(thead, _lcRunsSort, () => renderLcRunsView(_lcLastRunData));
 
             updateLcSummaryCards(run);
 
@@ -663,39 +734,27 @@ dbg('module', 'linkcheck.js loaded');
 
             let html = '';
             _sortLcRuns(sites).forEach((site, idx) => {
-                const total      = site.links_checked  ?? 0;
-                const broken     = site.broken_count   ?? 0;
-                const working    = total - broken;
-                const prevBroken  = site.prev_broken_count  ?? null;
-                const prevLinks   = site.prev_links_checked ?? null;
-                const prevWorking = (prevLinks !== null && prevBroken !== null) ? prevLinks - prevBroken : null;
+                const broken     = site.broken_count ?? 0;
                 const hasBroken  = broken > 0;
                 const key        = String(site.site_id ?? site.site_name ?? idx);
                 const isExpanded = _lcExpandedSites.has(key);
-                const domain     = (site.site_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+                const domain     = _lcDomain(site.site_url);
                 const rowBg = hasBroken ? 'background:var(--yellow-bg);' : '';
-                const icon  = hasBroken ? `<span style="color:var(--red);">⚠</span>`
-                                        : `<span style="color:var(--green);">✓</span>`;
-                const brokenCell  = (hasBroken
-                    ? `<span style="color:var(--red); font-weight:600;">${broken}</span>`
-                    : `<span style="color:var(--green);">0</span>`)
-                    + lcDeltaBadge(broken, prevBroken, true);
-                const workingCell = `<span style="color:${working === total ? 'var(--green)' : 'var(--text)'};">${working.toLocaleString()}</span>`
-                    + lcDeltaBadge(working, prevWorking, false);
+                const icon  = _lcStatusIcon(broken);
+                // Expand arrow lives with the status icon rather than a specific
+                // broken column, since Broken is now split into Internal/External.
                 const expandArrow = hasBroken
-                    ? `<span style="font-size:11px; color:var(--text-muted); margin-left:4px;">${isExpanded ? '▲' : '▼'}</span>`
+                    ? `<span class="lc-expand-arrow" style="font-size:11px; color:var(--text-muted); margin-left:4px;">${isExpanded ? '▲' : '▼'}</span>`
                     : '';
 
                 html += `<tr class="lc-site-row" style="cursor:${hasBroken ? 'pointer' : 'default'}; ${rowBg}"
                         data-site-key="${escapeHtml(key)}">
-                    <td style="text-align:center;">${icon}</td>
+                    <td style="text-align:center;">${icon}${expandArrow}</td>
                     <td>
                         <div style="font-weight:500;">${escapeHtml(site.site_name || '—')}</div>
                         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(domain)}</div>
                     </td>
-                    <td style="text-align:right; font-size:13px;">${total.toLocaleString()}</td>
-                    <td style="text-align:right; font-size:13px;">${workingCell}</td>
-                    <td style="text-align:right; font-size:13px;">${brokenCell}${expandArrow}</td>
+                    ${_lcScopeCellsHtml(site)}
                 </tr>`;
 
                 if (hasBroken) {
@@ -717,12 +776,8 @@ dbg('module', 'linkcheck.js loaded');
                     const key = row.dataset.siteKey;
                     const expandEl = body.querySelector(`.lc-expand[data-site-key="${CSS.escape(key)}"]`);
                     if (!expandEl) return;
-                    const arrow = row.querySelector('td:nth-child(5) span:last-child');
-                    const isOpen = expandEl.classList.toggle('open');
+                    const isOpen = _lcToggleExpand(expandEl, row.querySelector('.lc-expand-arrow'));
                     if (isOpen) _lcExpandedSites.add(key); else _lcExpandedSites.delete(key);
-                    if (arrow && arrow.textContent.trim().match(/[▼▲]/)) {
-                        arrow.textContent = isOpen ? ' ▲' : ' ▼';
-                    }
                 });
             });
         }
@@ -731,14 +786,12 @@ dbg('module', 'linkcheck.js loaded');
 
         /** Used by Runs view — totals come directly from the single run record. */
         function updateLcSummaryCards(run) {
-            document.getElementById('lcStatSites').textContent = run.total_sites ?? '—';
-            document.getElementById('lcStatPages').textContent = (run.total_pages_crawled ?? 0).toLocaleString();
-            document.getElementById('lcStatLinks').textContent = (run.total_links_checked ?? 0).toLocaleString();
-            const broken = run.total_broken ?? 0;
-            const el = document.getElementById('lcStatBroken');
-            el.textContent = broken.toLocaleString();
-            el.style.color = broken > 0 ? 'var(--red)' : 'var(--green)';
-            document.getElementById('lcSummary').style.display = '';
+            _lcSetSummaryCards({
+                sites: run.total_sites,
+                pages: run.total_pages_crawled ?? 0,
+                links: run.total_links_checked,
+                broken: run.total_broken,
+            });
         }
 
         /**
@@ -750,16 +803,12 @@ dbg('module', 'linkcheck.js loaded');
                 document.getElementById('lcSummary').style.display = 'none';
                 return;
             }
-            const totalPages  = siteStatusList.reduce((s, r) => s + (r.pages_crawled  ?? 0), 0);
-            const totalLinks  = siteStatusList.reduce((s, r) => s + (r.links_checked  ?? 0), 0);
-            const totalBroken = siteStatusList.reduce((s, r) => s + (r.broken_count   ?? 0), 0);
-            document.getElementById('lcStatSites').textContent = siteStatusList.length.toLocaleString();
-            document.getElementById('lcStatPages').textContent = totalPages.toLocaleString();
-            document.getElementById('lcStatLinks').textContent = totalLinks.toLocaleString();
-            const el = document.getElementById('lcStatBroken');
-            el.textContent = totalBroken.toLocaleString();
-            el.style.color = totalBroken > 0 ? 'var(--red)' : 'var(--green)';
-            document.getElementById('lcSummary').style.display = '';
+            _lcSetSummaryCards({
+                sites: siteStatusList.length,
+                pages: siteStatusList.reduce((s, r) => s + (r.pages_crawled ?? 0), 0),
+                links: siteStatusList.reduce((s, r) => s + (r.links_checked ?? 0), 0),
+                broken: siteStatusList.reduce((s, r) => s + (r.broken_count ?? 0), 0),
+            });
         }
 
         function renderLcEmpty() {
@@ -791,14 +840,12 @@ dbg('module', 'linkcheck.js loaded');
             document.getElementById('lcProgressCount').textContent =
                 tot > 0 ? `${cur} / ${tot}` : '';
 
-            // Live summary
-            document.getElementById('lcStatSites').textContent = tot || '—';
-            document.getElementById('lcStatLinks').textContent = (activeRun.total_links ?? 0).toLocaleString();
-            const bl = activeRun.broken_links ?? 0;
-            const blEl = document.getElementById('lcStatBroken');
-            blEl.textContent = bl;
-            blEl.style.color = bl > 0 ? 'var(--red)' : 'var(--green)';
-            document.getElementById('lcSummary').style.display = '';
+            // Live summary — no pages count while a run is in progress
+            _lcSetSummaryCards({
+                sites: tot || '—',
+                links: activeRun.total_links,
+                broken: activeRun.broken_links,
+            });
         }
 
         function lcHideProgress() {
@@ -915,7 +962,7 @@ dbg('module', 'linkcheck.js loaded');
             const listEl = document.getElementById('lcSiteSelectList');
             listEl.innerHTML = _lcSiteList.map(s => {
                 const checked = _lcSelectedIds.has(String(s.id)) ? 'checked' : '';
-                const domain = (s.url || '').replace(/^https?:\/\//, '');
+                const domain = _lcDomain(s.url);
                 return `<label style="display:flex; align-items:center; gap:10px; padding:7px 18px; cursor:pointer; font-size:13px;" class="lc-site-select-row">
                     <input type="checkbox" data-site-id="${s.id}" ${checked}
                            style="accent-color:var(--accent); width:15px; height:15px; cursor:pointer; flex-shrink:0;">
@@ -1114,22 +1161,50 @@ dbg('module', 'linkcheck.js loaded');
 
         // downloadCsv moved to dom.js
 
+        // ── CSV scope-column helpers ──────────────────────────────────────────────
+        // Shared by all three exports below — keeps CSV columns in sync with the
+        // Internal/External breakdown shown on screen.
+        const _LC_CSV_SCOPE_HEADERS = [
+            'Internal Links', 'Internal Working', 'Internal Broken',
+            'External Links', 'External Working', 'External Broken',
+        ];
+        function _lcCsvScopeValues(row) {
+            const c = _lcScopeCounts(row || {});
+            return [
+                c.intWasChecked ? c.intChecked : '—', c.intWasChecked ? c.intWorking : '—', c.intWasChecked ? c.intBroken : '—',
+                c.extWasChecked ? c.extChecked : '—', c.extWasChecked ? c.extWorking : '—', c.extWasChecked ? c.extBroken : '—',
+            ];
+        }
+        // Blank filler matching _LC_CSV_SCOPE_HEADERS' length, for broken-link detail rows.
+        const _LC_CSV_SCOPE_BLANK = ['', '', '', '', '', ''];
+        // Shared by exportLcRunsCsv and exportLcSiteHistoryCsv — both append a
+        // broken-link detail section after the site/run summary rows.
+        const _LC_CSV_BROKEN_HEADERS = [
+            '(Broken) Status/Error', '(Broken) Scope', '(Broken) Link URL', '(Broken) Found On', '(Broken) Redirects To',
+        ];
+        function _lcCsvBrokenLinkRow(link) {
+            return [
+                link.status_code || link.error || '',
+                link.is_external ? 'External' : 'Internal',
+                link.link_url    || '',
+                link.source_page || '',
+                link.redirect_url || '',
+            ];
+        }
+
         function exportLcSiteStatusCsv() {
             const today = new Date().toISOString().slice(0, 10);
-            const rows = [['Site', 'Domain', 'Last Checked', 'Run ID', 'Pages Crawled', 'Total Links', 'Working', 'Broken']];
+            const rows = [['Site', 'Domain', 'Last Checked', 'Run ID', 'Pages Crawled', ..._LC_CSV_SCOPE_HEADERS]];
             const activeSites = _lcSiteList.filter(s => !s.is_removed);
             activeSites.forEach(site => {
                 const st = _lcLastSiteStatusData[String(site.id)];
-                const total    = st ? (st.links_checked ?? 0) : '';
-                const broken   = st ? (st.broken_count  ?? 0) : '';
-                const working  = (total !== '' && broken !== '') ? total - broken : '';
                 const pages    = st ? (st.pages_crawled ?? 0) : '';
                 const runId    = st ? (st.run_id ?? '') : '';
-                const domain   = (site.url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+                const domain   = _lcDomain(site.url);
                 const lastChecked = st?.run_started_at
                     ? new Date(st.run_started_at + 'Z').toISOString().slice(0, 16).replace('T', ' ')
                     : '';
-                rows.push([site.name || '', domain, lastChecked, runId, pages, total, working, broken]);
+                rows.push([site.name || '', domain, lastChecked, runId, pages, ..._lcCsvScopeValues(st)]);
             });
             downloadCsv(rows, `link-check-sites-${today}.csv`);
         }
@@ -1146,21 +1221,14 @@ dbg('module', 'linkcheck.js loaded');
                  run.total_sites ?? 0, run.total_pages_crawled ?? 0,
                  run.total_links_checked ?? 0, run.total_broken ?? 0],
                 [],
-                ['Site', 'Domain', 'Pages Crawled', 'Links Checked', 'Working', 'Broken',
-                 '(Broken) Status/Error', '(Broken) Link URL', '(Broken) Found On'],
+                ['Site', 'Domain', 'Pages Crawled', ..._LC_CSV_SCOPE_HEADERS, ..._LC_CSV_BROKEN_HEADERS],
             ];
             sites.forEach(site => {
-                const total  = site.links_checked ?? 0;
-                const broken = site.broken_count  ?? 0;
-                const domain = (site.site_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
-                rows.push([site.site_name || '', domain,
-                    site.pages_crawled ?? 0, total, total - broken, broken,
-                    '', '', '']);
+                const domain = _lcDomain(site.site_url);
+                rows.push([site.site_name || '', domain, site.pages_crawled ?? 0,
+                    ..._lcCsvScopeValues(site), '', '', '', '', '']);
                 (site.broken_links || []).forEach(link => {
-                    rows.push(['', '', '', '', '', '',
-                        link.status_code || link.error || '',
-                        link.link_url    || '',
-                        link.source_page || '']);
+                    rows.push(['', '', '', ..._LC_CSV_SCOPE_BLANK, ..._lcCsvBrokenLinkRow(link)]);
                 });
             });
             downloadCsv(rows, `link-check-run-${run.id ?? 0}-${dateStr}.csv`);
@@ -1171,26 +1239,21 @@ dbg('module', 'linkcheck.js loaded');
                 .replace(/[^a-z0-9]/gi, '-').toLowerCase();
             const siteId = _lcCurrentHistorySite.id;
             const today = new Date().toISOString().slice(0, 10);
-            const rows = [['Date', 'Run ID', 'Pages Crawled', 'Total Links', 'Working', 'Broken', 'Status/Error', 'Link URL', 'Found On']];
+            const rows = [['Date', 'Run ID', 'Pages Crawled', ..._LC_CSV_SCOPE_HEADERS, ..._LC_CSV_BROKEN_HEADERS]];
             for (const r of _lcLastHistoryData) {
                 const d = new Date((r.started_at || '') + 'Z');
-                const total  = r.links_checked ?? 0;
-                const broken = r.broken_count  ?? 0;
+                const broken = r.broken_count ?? 0;
                 rows.push([
                     d.toISOString().slice(0, 16).replace('T', ' '),
                     r.run_id ?? '',
                     r.pages_crawled ?? 0,
-                    total, total - broken, broken,
-                    '', '', '',
+                    ..._lcCsvScopeValues(r), '', '', '', '', '',
                 ]);
                 if (broken > 0) {
                     try {
                         const links = await lcGet(`/api/linkcheck/results/${r.run_id}/site/${siteId}`);
                         links.forEach(link => rows.push([
-                            '', '', '', '', '', '',
-                            link.status_code || link.error || '',
-                            link.link_url    || '',
-                            link.source_page || '',
+                            '', '', '', ..._LC_CSV_SCOPE_BLANK, ..._lcCsvBrokenLinkRow(link),
                         ]));
                     } catch { /* skip broken-link detail if fetch fails */ }
                 }
