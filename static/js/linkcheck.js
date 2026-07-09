@@ -47,6 +47,7 @@ dbg('module', 'linkcheck.js loaded');
         // Link scope toggles (persisted to localStorage)
         let _lcCheckInternal = true;
         let _lcCheckExternal = false;
+        let _lcTrackRedirects = false;
 
         const LC_STORAGE_KEY  = 'lc_selected_sites';
         const LC_SCOPE_KEY    = 'lc_link_scope';
@@ -123,6 +124,7 @@ dbg('module', 'linkcheck.js loaded');
                 if (saved && typeof saved === 'object') {
                     _lcCheckInternal = saved.internal !== false; // default true
                     _lcCheckExternal = !!saved.external;
+                    _lcTrackRedirects = !!saved.trackRedirects;
                 }
             } catch { /* ignore */ }
             syncLcScopeButtons();
@@ -514,20 +516,25 @@ dbg('module', 'linkcheck.js loaded');
                 const icon = _lcStatusIcon(broken);
                 const rowBg    = broken > 0 ? 'background:var(--yellow-bg);' : '';
                 const expandId = `lc-hist-expand-${r.run_id}`;
+                // A run with track_redirects on may have detail rows (tracked
+                // successful redirects) worth expanding to even with 0 broken —
+                // we don't know for sure without fetching, so allow expansion
+                // whenever the run tracked redirects, not just when broken > 0.
+                const canExpand = broken > 0 || !!r.track_redirects;
                 // Expand arrow lives with the status icon rather than a specific
                 // broken column, since Broken is now split into Internal/External.
-                const expandArrow = broken > 0
+                const expandArrow = canExpand
                     ? `<span class="lc-expand-arrow" style="font-size:11px; color:var(--text-muted); margin-left:4px;">▼</span>`
                     : '';
 
-                html += `<tr class="lc-site-row" style="cursor:${broken > 0 ? 'pointer' : 'default'}; ${rowBg}"
+                html += `<tr class="lc-site-row" style="cursor:${canExpand ? 'pointer' : 'default'}; ${rowBg}"
                         data-run-id="${r.run_id}" data-site-id="${escapeHtml(String(siteId))}" data-expand-id="${expandId}">
                     <td style="text-align:center;">${icon}${expandArrow}</td>
                     <td style="font-size:13px;">${dateStr}</td>
                     ${_lcScopeCellsHtml(r)}
                 </tr>`;
 
-                if (broken > 0) {
+                if (canExpand) {
                     // Expand row — plain <tr> (no nested tbody); content lazy-loaded on first click
                     _lcHistoryRowMap[expandId] = r;
                     html += `<tr id="${expandId}" class="lc-expand" data-loaded="false">
@@ -749,8 +756,11 @@ dbg('module', 'linkcheck.js loaded');
             const hasRedirects = sortedLinks.some(l => l.redirect_url);
 
             const rows = sortedLinks.map(link => {
+                // A row can now be a successful (tracked) redirect, not just a
+                // broken link — color the status by is_broken rather than
+                // assuming every row here is broken.
                 const statusCell = link.status_code
-                    ? `<span style="font-weight:600; color:var(--red);">${link.status_code}</span>`
+                    ? `<span style="font-weight:600; color:${link.is_broken ? 'var(--red)' : 'var(--green)'};">${link.status_code}</span>`
                     : `<span style="color:var(--text-muted);">${escapeHtml(link.error || 'Error')}</span>`;
                 const scopeBadge = link.is_external
                     ? `<span class="lc-badge lc-badge-external">External</span>`
@@ -836,6 +846,12 @@ dbg('module', 'linkcheck.js loaded');
             _sortLcRuns(sites).forEach((site, idx) => {
                 const broken     = site.broken_count ?? 0;
                 const hasBroken  = broken > 0;
+                const preloaded  = site.broken_links || [];
+                // With track_redirects on, a site can have detail rows (tracked
+                // successful redirects) to show even with 0 broken links — the
+                // row stays expandable in that case, but the icon/highlight
+                // still reflect actual brokenness only.
+                const hasDetailRows = hasBroken || preloaded.length > 0;
                 const key        = String(site.site_id ?? site.site_name ?? idx);
                 const isExpanded = _lcExpandedSites.has(key);
                 const domain     = _lcDomain(site.site_url);
@@ -843,11 +859,11 @@ dbg('module', 'linkcheck.js loaded');
                 const icon  = _lcStatusIcon(broken);
                 // Expand arrow lives with the status icon rather than a specific
                 // broken column, since Broken is now split into Internal/External.
-                const expandArrow = hasBroken
+                const expandArrow = hasDetailRows
                     ? `<span class="lc-expand-arrow" style="font-size:11px; color:var(--text-muted); margin-left:4px;">${isExpanded ? '▲' : '▼'}</span>`
                     : '';
 
-                html += `<tr class="lc-site-row" style="cursor:${hasBroken ? 'pointer' : 'default'}; ${rowBg}"
+                html += `<tr class="lc-site-row" style="cursor:${hasDetailRows ? 'pointer' : 'default'}; ${rowBg}"
                         data-site-key="${escapeHtml(key)}">
                     <td style="text-align:center;">${icon}${expandArrow}</td>
                     <td>
@@ -857,10 +873,9 @@ dbg('module', 'linkcheck.js loaded');
                     ${_lcScopeCellsHtml(site)}
                 </tr>`;
 
-                if (hasBroken) {
+                if (hasDetailRows) {
                     // Expand row — plain <tr> (no nested tbody) avoids invalid HTML.
                     // broken_links are pre-loaded from the API response.
-                    const preloaded = site.broken_links || [];
                     _lcRunsCsvByKey[key] = { links: preloaded, siteName: site.site_name };
                     html += `<tr class="lc-expand${isExpanded ? ' open' : ''}" data-site-key="${escapeHtml(key)}" data-loaded="true">
                         <td colspan="${COLS}" class="lc-expand-cell">
@@ -999,6 +1014,7 @@ dbg('module', 'linkcheck.js loaded');
             const body = {
                 check_internal: _lcCheckInternal,
                 check_external: _lcCheckExternal,
+                track_redirects: _lcTrackRedirects,
             };
             if (_lcSiteList.length && _lcSelectedIds.size < _lcSiteList.length) {
                 body.site_ids = [..._lcSelectedIds];
@@ -1131,23 +1147,31 @@ dbg('module', 'linkcheck.js loaded');
         function syncLcScopeButtons() {
             const intBtn = document.getElementById('lcScopeInternal');
             const extBtn = document.getElementById('lcScopeExternal');
+            const redirBtn = document.getElementById('lcScopeRedirects');
             const note   = document.getElementById('lcScopeNote');
             intBtn.classList.toggle('active', _lcCheckInternal);
             intBtn.textContent = _lcCheckInternal ? '✓ Internal' : 'Internal';
             extBtn.classList.toggle('active', _lcCheckExternal);
             extBtn.textContent = _lcCheckExternal ? '✓ External' : 'External';
+            redirBtn.classList.toggle('active', _lcTrackRedirects);
+            redirBtn.textContent = _lcTrackRedirects ? '✓ Successful redirects' : '↪ Successful redirects';
+            let note_text;
             if (_lcCheckInternal && _lcCheckExternal) {
-                note.textContent = 'Checking both internal and external links.';
+                note_text = 'Checking both internal and external links.';
             } else if (_lcCheckExternal) {
-                note.textContent = 'Checking external links only.';
+                note_text = 'Checking external links only.';
             } else {
-                note.textContent = 'Checking internal links only. External links are classified and counted but not checked.';
+                note_text = 'Checking internal links only. External links are classified and counted but not checked.';
             }
+            note.textContent = note_text + (_lcTrackRedirects
+                ? ' Successful redirects will also be saved and shown, not just counted.'
+                : '');
         }
 
         function saveLcScope() {
             localStorage.setItem(LC_SCOPE_KEY,
-                JSON.stringify({ internal: _lcCheckInternal, external: _lcCheckExternal }));
+                JSON.stringify({ internal: _lcCheckInternal, external: _lcCheckExternal,
+                                 trackRedirects: _lcTrackRedirects }));
         }
 
         document.getElementById('lcScopeInternal').addEventListener('click', () => {
@@ -1157,6 +1181,11 @@ dbg('module', 'linkcheck.js loaded');
         });
         document.getElementById('lcScopeExternal').addEventListener('click', () => {
             _lcCheckExternal = !_lcCheckExternal;
+            syncLcScopeButtons();
+            saveLcScope();
+        });
+        document.getElementById('lcScopeRedirects').addEventListener('click', () => {
+            _lcTrackRedirects = !_lcTrackRedirects;
             syncLcScopeButtons();
             saveLcScope();
         });
@@ -1326,6 +1355,7 @@ dbg('module', 'linkcheck.js loaded');
             if (defaults) {
                 _lcCheckInternal = defaults.internal !== false;
                 _lcCheckExternal = !!defaults.external;
+                _lcTrackRedirects = !!defaults.trackRedirects;
                 if (defaults.site_ids === null) {
                     // null means "all sites"
                     _lcSelectedIds = new Set(_lcSiteList.map(s => String(s.id)));
@@ -1343,6 +1373,7 @@ dbg('module', 'linkcheck.js loaded');
                 // Factory defaults
                 _lcCheckInternal = true;
                 _lcCheckExternal = false;
+                _lcTrackRedirects = false;
                 _lcSelectedIds   = new Set(_lcSiteList.map(s => String(s.id)));
             }
 
@@ -1361,6 +1392,7 @@ dbg('module', 'linkcheck.js loaded');
             localStorage.setItem(LC_DEFAULTS_KEY, JSON.stringify({
                 internal:  _lcCheckInternal,
                 external:  _lcCheckExternal,
+                trackRedirects: _lcTrackRedirects,
                 // null = all sites (more resilient to sites being added later)
                 site_ids:  _lcSelectedIds.size === _lcSiteList.length
                     ? null
@@ -1428,12 +1460,14 @@ dbg('module', 'linkcheck.js loaded');
                 c.extWasChecked ? c.extChecked : '—', c.extWasChecked ? c.extWorking : '—', c.extWasChecked ? c.extBroken : '—',
             ];
         }
-        // Blank filler matching _LC_CSV_SCOPE_HEADERS' length, for broken-link detail rows.
+        // Blank filler matching _LC_CSV_SCOPE_HEADERS' length, for detail rows.
         const _LC_CSV_SCOPE_BLANK = ['', '', '', '', '', ''];
         // Shared by exportLcRunsCsv and exportLcSiteHistoryCsv — both append a
-        // broken-link detail section after the site/run summary rows.
+        // detail section after the site/run summary rows. Covers broken links
+        // always, plus successful redirects too when track_redirects was on
+        // (hence "Detail", not "Broken" — a row here isn't necessarily broken).
         const _LC_CSV_BROKEN_HEADERS = [
-            '(Broken) Status/Error', '(Broken) Scope', '(Broken) Link URL', '(Broken) Found On', '(Broken) Redirects To',
+            '(Detail) Status', '(Detail) Scope', '(Detail) Link URL', '(Detail) Found On', '(Detail) Redirects To',
         ];
         function _lcCsvBrokenLinkRow(link) {
             return [

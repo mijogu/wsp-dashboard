@@ -352,14 +352,16 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                    save_site_run_fn=None,
                    check_internal: bool = True,
                    check_external: bool = False,
-                   ignore_patterns: list[str] | None = None):
+                   ignore_patterns: list[str] | None = None,
+                   track_redirects: bool = False):
     """
     Run link checks on all sites. Call in a background thread.
 
     Args:
         sites:             list of dicts with 'id', 'name', 'url'
         add_log_fn:        function(source, level, message)
-        save_result_fn:    function(run_id, result_dict)  — only broken links
+        save_result_fn:    function(run_id, result_dict) — broken links, plus
+                           successful redirects too when track_redirects=True
         finish_run_fn:     function(run_id, pages, links, broken, status)
         run_id:            DB run ID
         site_configs:      dict keyed by str(site_id) with per-site settings
@@ -372,6 +374,10 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
         ignore_patterns:   case-insensitive substrings; any link URL containing
                             one is dropped before counting/checking (e.g. calendar
                             add-links that are noise rather than real breakage)
+        track_redirects:   when True, also save a result row for links that
+                            redirect successfully (not just broken ones), so
+                            their source/destination is visible, not just
+                            counted in the aggregate redirect_count
     """
     global _active_check, _cancel_requested
     ignore_patterns = [p.lower() for p in (ignore_patterns or []) if p]
@@ -524,10 +530,12 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                     _active_check["total_links"] = total_links_checked
 
                     # Count redirects for ALL checked links (working or broken)
-                    if check.get("redirect_url"):
+                    has_redirect = bool(check.get("redirect_url"))
+                    if has_redirect:
                         site_redirects += 1
 
-                    if check["is_broken"]:
+                    is_broken = check["is_broken"]
+                    if is_broken:
                         site_broken += 1
                         if is_ext:
                             site_external_broken += 1
@@ -536,6 +544,11 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                         total_broken += 1
                         _active_check["broken_links"] = total_broken
 
+                    # Broken links are always saved; successful redirects are
+                    # saved too when track_redirects is on, so their
+                    # source/destination is visible (not just the aggregate
+                    # site_redirects count above).
+                    if is_broken or (track_redirects and has_redirect):
                         save_result_fn(run_id, {
                             "site_id":    site_id,
                             "site_name":  site_name,
@@ -544,7 +557,7 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                             "link_url":   url,
                             "status_code": check["status_code"],
                             "redirect_url": check["redirect_url"],
-                            "is_broken":  True,
+                            "is_broken":  is_broken,
                             "is_external": is_ext,
                             "is_image":   is_img,
                             "error":      check.get("error"),

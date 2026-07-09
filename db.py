@@ -325,6 +325,8 @@ def init_db():
         "ALTER TABLE site_config ADD COLUMN hidden_from_onboarding INTEGER NOT NULL DEFAULT 0",
         # Link checker v4 — ad-hoc (unregistered) URL checks
         "ALTER TABLE link_check_runs ADD COLUMN is_adhoc INTEGER DEFAULT 0",
+        # Link checker v5 — optional tracking of successful (non-broken) redirects
+        "ALTER TABLE link_check_runs ADD COLUMN track_redirects INTEGER DEFAULT 0",
     ]:
         try:
             conn.execute(migration)
@@ -843,14 +845,15 @@ def get_results_for_site(site_id) -> list:
 
 
 def create_link_check_run(check_internal: bool = True, check_external: bool = False,
-                           is_adhoc: bool = False) -> int:
+                           is_adhoc: bool = False, track_redirects: bool = False) -> int:
     """Create a new link check run. Returns the run_id."""
     conn = _get_conn()
     cur = conn.execute(
-        "INSERT INTO link_check_runs (started_at, check_internal, check_external, is_adhoc) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO link_check_runs "
+        "(started_at, check_internal, check_external, is_adhoc, track_redirects) "
+        "VALUES (?, ?, ?, ?, ?)",
         (datetime.utcnow().isoformat(), 1 if check_internal else 0, 1 if check_external else 0,
-         1 if is_adhoc else 0)
+         1 if is_adhoc else 0, 1 if track_redirects else 0)
     )
     conn.commit()
     return cur.lastrowid
@@ -1022,7 +1025,7 @@ def get_link_check_site_history(site_id: int) -> list:
                external_count, redirect_count, image_link_count,
                internal_checked_count, internal_broken_count,
                external_checked_count, external_broken_count,
-               check_internal, check_external,
+               check_internal, check_external, track_redirects,
                prev_links_checked, prev_broken_count
         FROM (
             SELECT sr.run_id, r.started_at, r.finished_at, r.status,
@@ -1030,7 +1033,7 @@ def get_link_check_site_history(site_id: int) -> list:
                    sr.external_count, sr.redirect_count, sr.image_link_count,
                    sr.internal_checked_count, sr.internal_broken_count,
                    sr.external_checked_count, sr.external_broken_count,
-                   r.check_internal, r.check_external,
+                   r.check_internal, r.check_external, r.track_redirects,
                    LAG(sr.links_checked) OVER (ORDER BY sr.run_id ASC) AS prev_links_checked,
                    LAG(sr.broken_count)  OVER (ORDER BY sr.run_id ASC) AS prev_broken_count
             FROM link_check_site_runs sr

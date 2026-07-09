@@ -150,6 +150,7 @@ class LinkCheckMixin:
         site_ids_filter  = body.get("site_ids")       # list of IDs, or None = all
         check_internal   = body.get("check_internal", True)
         check_external   = body.get("check_external", False)
+        track_redirects  = body.get("track_redirects", False)
 
         # Prefer permanent registry; fall back to live MainWP cache
         registered = get_registered_sites()
@@ -174,7 +175,8 @@ class LinkCheckMixin:
         site_configs = get_all_site_configs()
         ignore_patterns = [p["pattern"] for p in get_link_check_ignore_patterns(enabled_only=True)]
         run_id = create_link_check_run(
-            check_internal=bool(check_internal), check_external=bool(check_external))
+            check_internal=bool(check_internal), check_external=bool(check_external),
+            track_redirects=bool(track_redirects))
         update_link_check_run_totals(run_id, len(sites))
 
         t = threading.Thread(
@@ -187,6 +189,7 @@ class LinkCheckMixin:
                 "check_internal":  bool(check_internal),
                 "check_external":  bool(check_external),
                 "ignore_patterns": ignore_patterns,
+                "track_redirects": bool(track_redirects),
             },
             daemon=True,
         )
@@ -203,8 +206,9 @@ class LinkCheckMixin:
         MainWP — e.g. a prospective client's site during due diligence.
         Reuses run_link_check() unchanged; the only difference from a normal
         run is a single synthetic site instead of a registry sweep, and
-        always checking both internal + external links (a due-diligence
-        audit should be thorough by default).
+        always checking both internal + external links and tracking
+        successful redirects (a due-diligence audit should be thorough by
+        default, regardless of the Options modal's persisted scope toggles).
         """
         active = get_active_check()
         if active:
@@ -230,7 +234,8 @@ class LinkCheckMixin:
         sites = [{"id": site_id, "name": name, "url": url}]
 
         ignore_patterns = [p["pattern"] for p in get_link_check_ignore_patterns(enabled_only=True)]
-        run_id = create_link_check_run(check_internal=True, check_external=True, is_adhoc=True)
+        run_id = create_link_check_run(check_internal=True, check_external=True,
+                                        is_adhoc=True, track_redirects=True)
         update_link_check_run_totals(run_id, 1)
 
         t = threading.Thread(
@@ -243,6 +248,7 @@ class LinkCheckMixin:
                 "check_internal":  True,
                 "check_external":  True,
                 "ignore_patterns": ignore_patterns,
+                "track_redirects": True,
             },
             daemon=True,
         )
