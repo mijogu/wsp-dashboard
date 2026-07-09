@@ -327,6 +327,10 @@ def init_db():
         "ALTER TABLE link_check_runs ADD COLUMN is_adhoc INTEGER DEFAULT 0",
         # Link checker v5 — optional tracking of successful (non-broken) redirects
         "ALTER TABLE link_check_runs ADD COLUMN track_redirects INTEGER DEFAULT 0",
+        # Link checker v6 — Assets scope (img/css/js/iframe/srcset)
+        "ALTER TABLE link_check_runs ADD COLUMN check_assets INTEGER DEFAULT 0",
+        "ALTER TABLE link_check_results ADD COLUMN source_tag TEXT DEFAULT 'a'",
+        "ALTER TABLE link_check_site_runs ADD COLUMN asset_link_count INTEGER DEFAULT 0",
     ]:
         try:
             conn.execute(migration)
@@ -845,15 +849,16 @@ def get_results_for_site(site_id) -> list:
 
 
 def create_link_check_run(check_internal: bool = True, check_external: bool = False,
-                           is_adhoc: bool = False, track_redirects: bool = False) -> int:
+                           is_adhoc: bool = False, track_redirects: bool = False,
+                           check_assets: bool = False) -> int:
     """Create a new link check run. Returns the run_id."""
     conn = _get_conn()
     cur = conn.execute(
         "INSERT INTO link_check_runs "
-        "(started_at, check_internal, check_external, is_adhoc, track_redirects) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "(started_at, check_internal, check_external, is_adhoc, track_redirects, check_assets) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         (datetime.utcnow().isoformat(), 1 if check_internal else 0, 1 if check_external else 0,
-         1 if is_adhoc else 0, 1 if track_redirects else 0)
+         1 if is_adhoc else 0, 1 if track_redirects else 0, 1 if check_assets else 0)
     )
     conn.commit()
     return cur.lastrowid
@@ -865,8 +870,8 @@ def save_link_check_result(run_id: int, result: dict):
     conn.execute(
         "INSERT INTO link_check_results "
         "(run_id, site_id, site_name, site_url, source_page, link_url, "
-        " status_code, redirect_url, is_broken, is_external, is_image, error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " status_code, redirect_url, is_broken, is_external, is_image, error, source_tag) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             run_id,
             result.get("site_id"),
@@ -880,6 +885,7 @@ def save_link_check_result(run_id: int, result: dict):
             1 if result.get("is_external") else 0,
             1 if result.get("is_image")    else 0,
             result.get("error"),
+            result.get("source_tag", "a"),
         )
     )
     conn.commit()
@@ -946,7 +952,8 @@ def save_link_check_site_run(run_id: int, site_id, site_name: str,
                               internal_checked_count: int = 0,
                               internal_broken_count: int = 0,
                               external_checked_count: int = 0,
-                              external_broken_count: int = 0):
+                              external_broken_count: int = 0,
+                              asset_link_count: int = 0):
     """Save a per-site summary row after each site finishes being checked."""
     conn = _get_conn()
     conn.execute(
@@ -954,12 +961,12 @@ def save_link_check_site_run(run_id: int, site_id, site_name: str,
         "(run_id, site_id, site_name, site_url, pages_crawled, links_checked, "
         " broken_count, external_count, redirect_count, image_link_count, "
         " internal_checked_count, internal_broken_count, "
-        " external_checked_count, external_broken_count) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " external_checked_count, external_broken_count, asset_link_count) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (run_id, site_id, site_name, site_url, pages_crawled, links_checked,
          broken_count, external_count, redirect_count, image_link_count,
          internal_checked_count, internal_broken_count,
-         external_checked_count, external_broken_count)
+         external_checked_count, external_broken_count, asset_link_count)
     )
     conn.commit()
 
@@ -980,9 +987,10 @@ def get_link_check_site_status() -> list:
                sr.external_count, sr.redirect_count, sr.image_link_count,
                sr.internal_checked_count, sr.internal_broken_count,
                sr.external_checked_count, sr.external_broken_count,
+               sr.asset_link_count,
                sr.run_id,
                r.started_at AS run_started_at,
-               r.check_internal, r.check_external,
+               r.check_internal, r.check_external, r.check_assets,
                prev.links_checked AS prev_links_checked,
                prev.broken_count  AS prev_broken_count
         FROM link_check_site_runs sr
@@ -1024,16 +1032,16 @@ def get_link_check_site_history(site_id: int) -> list:
                pages_crawled, links_checked, broken_count,
                external_count, redirect_count, image_link_count,
                internal_checked_count, internal_broken_count,
-               external_checked_count, external_broken_count,
-               check_internal, check_external, track_redirects,
+               external_checked_count, external_broken_count, asset_link_count,
+               check_internal, check_external, track_redirects, check_assets,
                prev_links_checked, prev_broken_count
         FROM (
             SELECT sr.run_id, r.started_at, r.finished_at, r.status,
                    sr.pages_crawled, sr.links_checked, sr.broken_count,
                    sr.external_count, sr.redirect_count, sr.image_link_count,
                    sr.internal_checked_count, sr.internal_broken_count,
-                   sr.external_checked_count, sr.external_broken_count,
-                   r.check_internal, r.check_external, r.track_redirects,
+                   sr.external_checked_count, sr.external_broken_count, sr.asset_link_count,
+                   r.check_internal, r.check_external, r.track_redirects, r.check_assets,
                    LAG(sr.links_checked) OVER (ORDER BY sr.run_id ASC) AS prev_links_checked,
                    LAG(sr.broken_count)  OVER (ORDER BY sr.run_id ASC) AS prev_broken_count
             FROM link_check_site_runs sr
@@ -1196,8 +1204,8 @@ def get_link_check_results_for_run(run_id: int) -> list:
                sr.pages_crawled, sr.links_checked, sr.broken_count,
                sr.external_count, sr.redirect_count, sr.image_link_count,
                sr.internal_checked_count, sr.internal_broken_count,
-               sr.external_checked_count, sr.external_broken_count,
-               r.check_internal, r.check_external,
+               sr.external_checked_count, sr.external_broken_count, sr.asset_link_count,
+               r.check_internal, r.check_external, r.check_assets,
                prev.links_checked AS prev_links_checked,
                prev.broken_count  AS prev_broken_count
         FROM link_check_site_runs sr

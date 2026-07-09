@@ -80,24 +80,76 @@ def get_active_check() -> dict | None:
 
 # ── Link extraction ───────────────────────────────────────────
 
+def _parse_srcset(value: str) -> list[str]:
+    """
+    Parse a srcset attribute ("img-320w.jpg 320w, img-480w.jpg 480w") into
+    just the URLs — the width/density descriptor after each URL is discarded.
+    """
+    urls = []
+    for candidate in value.split(","):
+        tokens = candidate.strip().split()
+        if tokens:
+            urls.append(tokens[0])
+    return urls
+
+
 class _LinkExtractor(HTMLParser):
-    """Minimal HTMLParser subclass that collects all href values."""
+    """
+    Collects href/src-style URLs from a page, tagged with which HTML
+    construct they came from: 'a' (ordinary hyperlink), 'img' (<img src>,
+    <img srcset>, <source srcset>), 'link' (<link rel="stylesheet" href>),
+    'script' (<script src>), 'iframe' (<iframe src>).
+    """
 
     def __init__(self):
         super().__init__()
-        self.hrefs: list[str] = []
+        self.entries: list[dict] = []  # {"url": ..., "source_tag": ...}
 
     def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
         if tag == "a":
-            for name, value in attrs:
-                if name == "href" and value:
-                    self.hrefs.append(value)
+            href = attrs_dict.get("href")
+            if href:
+                self.entries.append({"url": href, "source_tag": "a"})
+        elif tag == "img":
+            src = attrs_dict.get("src")
+            if src:
+                self.entries.append({"url": src, "source_tag": "img"})
+            srcset = attrs_dict.get("srcset")
+            if srcset:
+                for url in _parse_srcset(srcset):
+                    self.entries.append({"url": url, "source_tag": "img"})
+        elif tag == "source":
+            srcset = attrs_dict.get("srcset")
+            if srcset:
+                for url in _parse_srcset(srcset):
+                    self.entries.append({"url": url, "source_tag": "img"})
+        elif tag == "link":
+            if (attrs_dict.get("rel") or "").strip().lower() == "stylesheet":
+                href = attrs_dict.get("href")
+                if href:
+                    self.entries.append({"url": href, "source_tag": "link"})
+        elif tag == "script":
+            src = attrs_dict.get("src")
+            if src:
+                self.entries.append({"url": src, "source_tag": "script"})
+        elif tag == "iframe":
+            src = attrs_dict.get("src")
+            if src:
+                self.entries.append({"url": src, "source_tag": "iframe"})
 
 
-def _extract_links(base_url: str, html: str) -> list[str]:
+def _extract_links(base_url: str, html: str) -> list[dict]:
     """
-    Parse HTML and return deduplicated absolute URLs from <a href> tags.
-    Skips mailto:, tel:, javascript:, and bare # anchors.
+    Parse HTML and return deduplicated absolute URLs (each tagged with its
+    source HTML construct — see _LinkExtractor) from <a href>, <img
+    src>/srcset, <source srcset>, <link rel=stylesheet href>, <script src>,
+    and <iframe src>.
+
+    Only http(s) URLs are kept — an allowlist rather than the old blocklist
+    of mailto:/tel:/javascript:/#, so it also naturally excludes data:/blob:
+    URIs, which are common for inline images/CSS backgrounds and would
+    otherwise be nonsensically "checked" as if they were real links.
     """
     parser = _LinkExtractor()
     try:
@@ -106,18 +158,20 @@ def _extract_links(base_url: str, html: str) -> list[str]:
         pass
 
     seen: set[str] = set()
-    result: list[str] = []
-    for href in parser.hrefs:
-        href = href.strip()
-        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+    result: list[dict] = []
+    for entry in parser.entries:
+        href = (entry["url"] or "").strip()
+        if not href or href.startswith("#"):
             continue
         absolute = urljoin(base_url, href)
-        # Strip fragments
         parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https"):
+            continue
+        # Strip fragments
         clean = parsed._replace(fragment="").geturl()
         if clean not in seen:
             seen.add(clean)
-            result.append(clean)
+            result.append({"url": clean, "source_tag": entry["source_tag"]})
     return result
 
 
@@ -298,7 +352,7 @@ def _fetch_page_links(page_url: str, site_url: str,
                       session: http_requests.Session) -> list[dict]:
     """
     Fetch one page, extract all links, classify internal vs external.
-    Returns list of {link_url, source_page, is_external}.
+    Returns list of {link_url, source_page, is_external, is_image, source_tag}.
     """
     try:
         resp = session.get(page_url, timeout=PAGE_FETCH_TIMEOUT)
@@ -310,16 +364,15 @@ def _fetch_page_links(page_url: str, site_url: str,
 
     raw_links = _extract_links(page_url, html)
     result = []
-    for link in raw_links:
-        parsed = urlparse(link)
-        if not parsed.scheme.startswith("http"):
-            continue
+    for entry in raw_links:
+        link = entry["url"]
         is_ext = not _is_same_domain(link, site_url)
         result.append({
             "link_url":   link,
             "source_page": page_url,
             "is_external": is_ext,
             "is_image":    _is_image_url(link),
+            "source_tag": entry["source_tag"],
         })
     return result
 
@@ -353,7 +406,8 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                    check_internal: bool = True,
                    check_external: bool = False,
                    ignore_patterns: list[str] | None = None,
-                   track_redirects: bool = False):
+                   track_redirects: bool = False,
+                   check_assets: bool = False):
     """
     Run link checks on all sites. Call in a background thread.
 
@@ -378,6 +432,14 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                             redirect successfully (not just broken ones), so
                             their source/destination is visible, not just
                             counted in the aggregate redirect_count
+        check_assets:      when True, also check discovered asset URLs
+                            (<img>/<link rel=stylesheet>/<script>/<iframe>/
+                            srcset) — independent of check_internal/
+                            check_external, which only gate ordinary <a>
+                            links. Assets are still classified internal vs.
+                            external (for bucketing into the existing
+                            broken-count columns), that classification just
+                            doesn't gate whether an asset gets checked.
     """
     global _active_check, _cancel_requested
     ignore_patterns = [p.lower() for p in (ignore_patterns or []) if p]
@@ -462,7 +524,15 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
             # link_meta carries everything needed for checking and DB storage.
             # Ignored links (e.g. calendar add-links) are dropped here, before
             # anything else, so they never appear in stats, checks, or results.
-            link_meta: dict[str, dict] = {}  # url → {source_page, is_external, is_image}
+            # source_tag == 'link' entries here are deduplicated, domain-
+            # classified stylesheet URLs, collected regardless of
+            # check_assets — a future stage can filter on this directly to
+            # know exactly which CSS files exist on this site, without
+            # needing to re-crawl. (It will still need its own per-run
+            # URL→content fetch cache to avoid re-fetching a shared
+            # stylesheet once per page that references it — no such cache
+            # exists anywhere today.)
+            link_meta: dict[str, dict] = {}  # url → {source_page, is_external, is_image, source_tag}
             for entry in all_links:
                 lu = entry["link_url"]
                 if lu in link_meta:
@@ -473,20 +543,30 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                     "source_page": entry["source_page"],
                     "is_external": entry.get("is_external", False),
                     "is_image":    entry.get("is_image",    False),
+                    "source_tag":  entry.get("source_tag",  "a"),
                 }
 
             # Aggregate stats that don't require HTTP checking
             site_external_count = sum(1 for m in link_meta.values() if m["is_external"])
             site_image_count    = sum(1 for m in link_meta.values() if m["is_image"])
+            site_asset_count    = sum(1 for m in link_meta.values() if m["source_tag"] != "a")
 
-            # Build the set to actually check based on caller-supplied scope flags
+            # Build the set to actually check based on caller-supplied scope flags.
+            # check_assets is independent of check_internal/check_external —
+            # asset URLs (source_tag != 'a') are only ever checked because of
+            # check_assets, regardless of which domain they're on; ordinary
+            # <a> links are only ever checked because of check_internal/
+            # check_external, regardless of check_assets.
             to_check: dict[str, dict] = {}
             if check_internal:
                 to_check.update({u: m for u, m in link_meta.items()
-                                  if not m["is_external"]})
+                                  if not m["is_external"] and m["source_tag"] == "a"})
             if check_external:
                 to_check.update({u: m for u, m in link_meta.items()
-                                  if m["is_external"]})
+                                  if m["is_external"] and m["source_tag"] == "a"})
+            if check_assets:
+                to_check.update({u: m for u, m in link_meta.items()
+                                  if m["source_tag"] != "a"})
 
             add_log_fn("LinkChecker", "info",
                        f"  {site_name}: {len(link_meta) - site_external_count} internal, "
@@ -515,6 +595,7 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                     source_page = meta["source_page"]
                     is_ext = meta["is_external"]
                     is_img = meta["is_image"]
+                    source_tag = meta["source_tag"]
                     try:
                         check = fut.result()
                     except Exception as e:
@@ -561,6 +642,7 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                             "is_external": is_ext,
                             "is_image":   is_img,
                             "error":      check.get("error"),
+                            "source_tag": source_tag,
                         })
 
             # Write per-site summary row (always, even with 0 broken)
@@ -576,6 +658,7 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                         internal_broken_count=site_internal_broken,
                         external_checked_count=site_external_checked,
                         external_broken_count=site_external_broken,
+                        asset_link_count=site_asset_count,
                     )
                 except Exception:
                     pass
@@ -588,7 +671,8 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                        f"  {'⚠️' if site_broken else '✓'} {site_name}: "
                        f"{len(pages_to_crawl)} pages, {len(to_check)} checked "
                        f"({site_external_count} ext · {site_image_count} img · "
-                       f"{site_redirects} redirect), {site_broken} broken")
+                       f"{site_asset_count} assets · {site_redirects} redirect), "
+                       f"{site_broken} broken")
 
             # Brief pause between sites
             time.sleep(1)

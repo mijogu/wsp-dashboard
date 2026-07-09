@@ -48,6 +48,7 @@ dbg('module', 'linkcheck.js loaded');
         let _lcCheckInternal = true;
         let _lcCheckExternal = false;
         let _lcTrackRedirects = false;
+        let _lcCheckAssets = false;
 
         const LC_STORAGE_KEY  = 'lc_selected_sites';
         const LC_SCOPE_KEY    = 'lc_link_scope';
@@ -125,6 +126,7 @@ dbg('module', 'linkcheck.js loaded');
                     _lcCheckInternal = saved.internal !== false; // default true
                     _lcCheckExternal = !!saved.external;
                     _lcTrackRedirects = !!saved.trackRedirects;
+                    _lcCheckAssets = !!saved.assets;
                 }
             } catch { /* ignore */ }
             syncLcScopeButtons();
@@ -194,8 +196,12 @@ dbg('module', 'linkcheck.js loaded');
             return {
                 intChecked, intBroken, intWorking: intChecked - intBroken,
                 extChecked, extBroken, extWorking: extChecked - extBroken,
-                intWasChecked: !!row.check_internal,
-                extWasChecked: !!row.check_external,
+                // A scope also counts as "checked" if Assets checking turned
+                // up real counts there, even when the ordinary Internal/
+                // External toggle was off for this run — otherwise a broken
+                // external asset would be found but hidden behind a "—".
+                intWasChecked: !!row.check_internal || intChecked > 0,
+                extWasChecked: !!row.check_external || extChecked > 0,
             };
         }
 
@@ -645,6 +651,7 @@ dbg('module', 'linkcheck.js loaded');
         function lcStatsBarHtml(site, links) {
             const redirectCount = site.redirect_count   ?? 0;
             const imageCount    = site.image_link_count ?? 0;
+            const assetCount    = site.asset_link_count ?? 0;
             const broken        = links.length;
 
             // DNS/SSL/connection failures never reach the HTTP layer at all, so
@@ -661,6 +668,7 @@ dbg('module', 'linkcheck.js loaded');
             const pills = [];
             if (redirectCount) pills.push(`<span>↪ ${redirectCount.toLocaleString()} redirect${redirectCount !== 1 ? 's' : ''} <span style="opacity:0.6;">(site total)</span></span>`);
             if (imageCount)    pills.push(`<span>🖼 ${imageCount.toLocaleString()} image link${imageCount !== 1 ? 's' : ''} <span style="opacity:0.6;">(site total)</span></span>`);
+            if (assetCount)    pills.push(`<span>📦 ${assetCount.toLocaleString()} asset link${assetCount !== 1 ? 's' : ''} <span style="opacity:0.6;">(site total)</span></span>`);
             if (broken > 0) {
                 const bp = [];
                 if (n404)     bp.push(`404: ${n404}`);
@@ -754,6 +762,7 @@ dbg('module', 'linkcheck.js loaded');
                 title="${escapeHtml(url || '')}">${escapeHtml(short)}</a>`;
 
             const hasRedirects = sortedLinks.some(l => l.redirect_url);
+            const SOURCE_TAG_LABELS = { img: 'IMG', link: 'CSS', script: 'JS', iframe: 'IFRAME' };
 
             const rows = sortedLinks.map(link => {
                 // A row can now be a successful (tracked) redirect, not just a
@@ -768,6 +777,12 @@ dbg('module', 'linkcheck.js loaded');
                 const imageBadge = link.is_image
                     ? `<span class="lc-badge" style="background:rgba(251,191,36,0.12); border-color:var(--yellow); color:var(--yellow);">Image</span>`
                     : '';
+                // Shown only for asset-tagged rows (img/link/script/iframe) —
+                // an ordinary <a href="photo.jpg"> stays source_tag='a' and
+                // relies on the Image badge above alone, unchanged from today.
+                const sourceBadge = (link.source_tag && link.source_tag !== 'a')
+                    ? `<span class="lc-badge lc-badge-external">${SOURCE_TAG_LABELS[link.source_tag] || link.source_tag.toUpperCase()}</span>`
+                    : '';
                 const redirectCell = hasRedirects
                     ? `<td>${link.redirect_url ? linkCell(link.redirect_url, shortUrl(link.redirect_url, 60)) : '<span style="color:var(--text-muted);">—</span>'}</td>`
                     : '';
@@ -781,7 +796,7 @@ dbg('module', 'linkcheck.js loaded');
                     : linkCell(link.link_url, shortUrl(link.link_url, 80));
                 return `<tr>
                     <td style="white-space:nowrap;">${statusCell}</td>
-                    <td style="white-space:nowrap;">${scopeBadge}${imageBadge}</td>
+                    <td style="white-space:nowrap;">${scopeBadge}${imageBadge}${sourceBadge}</td>
                     <td>${urlDisplay}</td>
                     <td>${linkCell(link.source_page, shortUrl(link.source_page, 60))}</td>
                     ${redirectCell}
@@ -1015,6 +1030,7 @@ dbg('module', 'linkcheck.js loaded');
                 check_internal: _lcCheckInternal,
                 check_external: _lcCheckExternal,
                 track_redirects: _lcTrackRedirects,
+                check_assets: _lcCheckAssets,
             };
             if (_lcSiteList.length && _lcSelectedIds.size < _lcSiteList.length) {
                 body.site_ids = [..._lcSelectedIds];
@@ -1148,6 +1164,7 @@ dbg('module', 'linkcheck.js loaded');
             const intBtn = document.getElementById('lcScopeInternal');
             const extBtn = document.getElementById('lcScopeExternal');
             const redirBtn = document.getElementById('lcScopeRedirects');
+            const assetsBtn = document.getElementById('lcScopeAssets');
             const note   = document.getElementById('lcScopeNote');
             intBtn.classList.toggle('active', _lcCheckInternal);
             intBtn.textContent = _lcCheckInternal ? '✓ Internal' : 'Internal';
@@ -1155,6 +1172,8 @@ dbg('module', 'linkcheck.js loaded');
             extBtn.textContent = _lcCheckExternal ? '✓ External' : 'External';
             redirBtn.classList.toggle('active', _lcTrackRedirects);
             redirBtn.textContent = _lcTrackRedirects ? '✓ Successful redirects' : '↪ Successful redirects';
+            assetsBtn.classList.toggle('active', _lcCheckAssets);
+            assetsBtn.textContent = _lcCheckAssets ? '✓ Assets' : '📦 Assets';
             let note_text;
             if (_lcCheckInternal && _lcCheckExternal) {
                 note_text = 'Checking both internal and external links.';
@@ -1165,13 +1184,15 @@ dbg('module', 'linkcheck.js loaded');
             }
             note.textContent = note_text + (_lcTrackRedirects
                 ? ' Successful redirects will also be saved and shown, not just counted.'
+                : '') + (_lcCheckAssets
+                ? ' Images, CSS, JS, and iframe sources will also be checked (all discovered, regardless of internal/external scope).'
                 : '');
         }
 
         function saveLcScope() {
             localStorage.setItem(LC_SCOPE_KEY,
                 JSON.stringify({ internal: _lcCheckInternal, external: _lcCheckExternal,
-                                 trackRedirects: _lcTrackRedirects }));
+                                 trackRedirects: _lcTrackRedirects, assets: _lcCheckAssets }));
         }
 
         document.getElementById('lcScopeInternal').addEventListener('click', () => {
@@ -1186,6 +1207,11 @@ dbg('module', 'linkcheck.js loaded');
         });
         document.getElementById('lcScopeRedirects').addEventListener('click', () => {
             _lcTrackRedirects = !_lcTrackRedirects;
+            syncLcScopeButtons();
+            saveLcScope();
+        });
+        document.getElementById('lcScopeAssets').addEventListener('click', () => {
+            _lcCheckAssets = !_lcCheckAssets;
             syncLcScopeButtons();
             saveLcScope();
         });
@@ -1356,6 +1382,7 @@ dbg('module', 'linkcheck.js loaded');
                 _lcCheckInternal = defaults.internal !== false;
                 _lcCheckExternal = !!defaults.external;
                 _lcTrackRedirects = !!defaults.trackRedirects;
+                _lcCheckAssets = !!defaults.assets;
                 if (defaults.site_ids === null) {
                     // null means "all sites"
                     _lcSelectedIds = new Set(_lcSiteList.map(s => String(s.id)));
@@ -1374,6 +1401,7 @@ dbg('module', 'linkcheck.js loaded');
                 _lcCheckInternal = true;
                 _lcCheckExternal = false;
                 _lcTrackRedirects = false;
+                _lcCheckAssets = false;
                 _lcSelectedIds   = new Set(_lcSiteList.map(s => String(s.id)));
             }
 
@@ -1393,6 +1421,7 @@ dbg('module', 'linkcheck.js loaded');
                 internal:  _lcCheckInternal,
                 external:  _lcCheckExternal,
                 trackRedirects: _lcTrackRedirects,
+                assets: _lcCheckAssets,
                 // null = all sites (more resilient to sites being added later)
                 site_ids:  _lcSelectedIds.size === _lcSiteList.length
                     ? null
@@ -1467,7 +1496,7 @@ dbg('module', 'linkcheck.js loaded');
         // always, plus successful redirects too when track_redirects was on
         // (hence "Detail", not "Broken" — a row here isn't necessarily broken).
         const _LC_CSV_BROKEN_HEADERS = [
-            '(Detail) Status', '(Detail) Scope', '(Detail) Link URL', '(Detail) Found On', '(Detail) Redirects To',
+            '(Detail) Status', '(Detail) Scope', '(Detail) Link URL', '(Detail) Found On', '(Detail) Redirects To', '(Detail) Source',
         ];
         function _lcCsvBrokenLinkRow(link) {
             return [
@@ -1476,6 +1505,7 @@ dbg('module', 'linkcheck.js loaded');
                 link.link_url    || '',
                 link.source_page || '',
                 link.redirect_url || '',
+                link.source_tag || 'a',
             ];
         }
 
@@ -1513,7 +1543,7 @@ dbg('module', 'linkcheck.js loaded');
             sites.forEach(site => {
                 const domain = _lcDomain(site.site_url);
                 rows.push([site.site_name || '', domain, site.pages_crawled ?? 0,
-                    ..._lcCsvScopeValues(site), '', '', '', '', '']);
+                    ..._lcCsvScopeValues(site), '', '', '', '', '', '']);
                 (site.broken_links || []).forEach(link => {
                     rows.push(['', '', '', ..._LC_CSV_SCOPE_BLANK, ..._lcCsvBrokenLinkRow(link)]);
                 });
@@ -1534,7 +1564,7 @@ dbg('module', 'linkcheck.js loaded');
                     d.toISOString().slice(0, 16).replace('T', ' '),
                     r.run_id ?? '',
                     r.pages_crawled ?? 0,
-                    ..._lcCsvScopeValues(r), '', '', '', '', '',
+                    ..._lcCsvScopeValues(r), '', '', '', '', '', '',
                 ]);
                 if (broken > 0) {
                     try {
