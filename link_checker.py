@@ -212,6 +212,32 @@ def fetch_sitemap_urls(site_url: str, session: http_requests.Session,
 
 # ── Single-link HTTP check ────────────────────────────────────
 
+def _categorize_link_error(e: Exception) -> str:
+    """
+    Map a connection-level exception to a short, honest label instead of a
+    raw (and previously truncation-mangled) exception string. These failures
+    all happen before any HTTP response exists — DNS resolution and TLS
+    handshakes complete (or don't) before the HTTP layer is ever reached — so
+    there is no real status code to report, only what stage the attempt died at.
+    """
+    msg = str(e)
+    if "Failed to resolve" in msg or "NameResolutionError" in msg:
+        return "DNS: not found"
+    if "Hostname mismatch" in msg or "certificate is not valid for" in msg:
+        return "SSL: hostname mismatch"
+    if "CERTIFICATE_VERIFY_FAILED" in msg or "unable to get local issuer certificate" in msg:
+        return "SSL: cert invalid"
+    if "HANDSHAKE_FAILURE" in msg or "handshake failure" in msg.lower():
+        return "SSL: handshake failed"
+    if "SSLError" in msg:
+        return "SSL: error"
+    if "Connection refused" in msg:
+        return "Connection refused"
+    if "Connection reset" in msg:
+        return "Connection reset"
+    return msg[:200]
+
+
 def _check_link(url: str, session: http_requests.Session,
                 timeout: int = LINK_CHECK_TIMEOUT) -> dict:
     """
@@ -258,10 +284,10 @@ def _check_link(url: str, session: http_requests.Session,
             result["error"] = "Timeout"
         except Exception as e:
             result["is_broken"] = True
-            result["error"] = str(e)[:200]
+            result["error"] = _categorize_link_error(e)
     except Exception as e:
         result["is_broken"] = True
-        result["error"] = str(e)[:200]
+        result["error"] = _categorize_link_error(e)
 
     return result
 
@@ -491,7 +517,7 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                             "status_code": None,
                             "redirect_url": None,
                             "is_broken": True,
-                            "error": str(e)[:200],
+                            "error": _categorize_link_error(e),
                         }
 
                     total_links_checked += 1

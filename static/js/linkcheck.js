@@ -639,10 +639,16 @@ dbg('module', 'linkcheck.js loaded');
             const imageCount    = site.image_link_count ?? 0;
             const broken        = links.length;
 
+            // DNS/SSL/connection failures never reach the HTTP layer at all, so
+            // they carry a categorized label instead of a status code (see
+            // _categorize_link_error in link_checker.py) — bucketed separately
+            // here rather than folded into "other".
             const n404     = links.filter(l => l.status_code === 404).length;
             const n5xx     = links.filter(l => l.status_code >= 500 && l.status_code < 600).length;
             const nTimeout = links.filter(l => (l.error || '').toLowerCase() === 'timeout').length;
-            const nOther   = broken - n404 - n5xx - nTimeout;
+            const nDns     = links.filter(l => (l.error || '').startsWith('DNS:')).length;
+            const nSsl     = links.filter(l => (l.error || '').startsWith('SSL:')).length;
+            const nOther   = broken - n404 - n5xx - nTimeout - nDns - nSsl;
 
             const pills = [];
             if (redirectCount) pills.push(`<span>↪ ${redirectCount.toLocaleString()} redirect${redirectCount !== 1 ? 's' : ''} <span style="opacity:0.6;">(site total)</span></span>`);
@@ -652,6 +658,8 @@ dbg('module', 'linkcheck.js loaded');
                 if (n404)     bp.push(`404: ${n404}`);
                 if (n5xx)     bp.push(`5xx: ${n5xx}`);
                 if (nTimeout) bp.push(`timeout: ${nTimeout}`);
+                if (nDns)     bp.push(`dns: ${nDns}`);
+                if (nSsl)     bp.push(`ssl: ${nSsl}`);
                 if (nOther > 0) bp.push(`other: ${nOther}`);
                 if (bp.length) pills.push(`<span style="color:var(--red);">⚠ ${bp.join(' · ')}</span>`);
             }
