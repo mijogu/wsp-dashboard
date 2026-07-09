@@ -183,6 +183,16 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_lcsr_run_id  ON link_check_site_runs(run_id);
         CREATE INDEX IF NOT EXISTS idx_lcsr_site_id ON link_check_site_runs(site_id);
 
+        -- Link checker settings: URL substring patterns to exclude from crawling
+        -- entirely (e.g. external calendar-add links that aren't worth checking)
+        CREATE TABLE IF NOT EXISTS link_check_ignore_patterns (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            pattern    TEXT NOT NULL,
+            note       TEXT,
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         -- Visual regression baselines: one screenshot per (site_id, page_url)
         CREATE TABLE IF NOT EXISTS baseline_screenshots (
             site_id         TEXT NOT NULL,
@@ -1209,6 +1219,52 @@ def get_link_check_results_for_run(run_id: int) -> list:
         sd["broken_links"] = [dict(b) for b in broken]
         result.append(sd)
     return result
+
+
+# ─── Link Checker: ignore patterns ───────────────────────────
+
+
+def get_link_check_ignore_patterns(enabled_only: bool = False) -> list:
+    """Return configured ignore patterns, newest first."""
+    conn = _get_conn()
+    sql = "SELECT * FROM link_check_ignore_patterns"
+    if enabled_only:
+        sql += " WHERE enabled = 1"
+    sql += " ORDER BY id DESC"
+    rows = conn.execute(sql).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_link_check_ignore_pattern(pattern: str, note: str = "") -> int:
+    """Insert a new ignore pattern. Returns the new row's id."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO link_check_ignore_patterns (pattern, note) VALUES (?, ?)",
+        (pattern, note)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_link_check_ignore_pattern(pattern_id: int, **kwargs) -> None:
+    """Update one or more columns on an ignore pattern."""
+    allowed = {"pattern", "note", "enabled"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+    if not updates:
+        return
+    conn = _get_conn()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    conn.execute(
+        f"UPDATE link_check_ignore_patterns SET {set_clause} WHERE id = ?",
+        list(updates.values()) + [pattern_id]
+    )
+    conn.commit()
+
+
+def delete_link_check_ignore_pattern(pattern_id: int) -> None:
+    conn = _get_conn()
+    conn.execute("DELETE FROM link_check_ignore_patterns WHERE id = ?", (pattern_id,))
+    conn.commit()
 
 
 # ─── Heartbeat Scans ─────────────────────────────────────────

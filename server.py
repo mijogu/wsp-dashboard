@@ -151,6 +151,8 @@ class DashboardHandler(
             self._get_link_check_runs()
         elif path == "/api/linkcheck/latest":
             self._get_latest_link_check()
+        elif path == "/api/linkcheck/ignore-patterns":
+            self._get_link_check_ignore_patterns()
         elif path.startswith("/api/linkcheck/results/"):
             run_id = path.split("/")[-1]
             self._get_link_check_results(run_id)
@@ -209,6 +211,8 @@ class DashboardHandler(
             self._start_link_check(body)
         elif path == "/api/linkcheck/cancel":
             self._cancel_link_check()
+        elif path == "/api/linkcheck/ignore-patterns":
+            self._create_link_check_ignore_pattern(body)
         elif path.startswith("/api/sites/config/"):
             site_id = path.split("/")[-1]
             self._save_site_config(site_id, body)
@@ -245,6 +249,9 @@ class DashboardHandler(
         elif path.startswith("/api/checklists/"):
             checklist_id = path.split("/")[-1]
             self._update_checklist(checklist_id, body)
+        elif path.startswith("/api/linkcheck/ignore-patterns/"):
+            pattern_id = path.split("/")[-1]
+            self._update_link_check_ignore_pattern(pattern_id, body)
         else:
             self._json_response({"error": "Not found"}, 404)
 
@@ -261,6 +268,9 @@ class DashboardHandler(
         elif path.startswith("/api/checklists/"):
             checklist_id = path.split("/")[-1]
             self._delete_checklist(checklist_id)
+        elif path.startswith("/api/linkcheck/ignore-patterns/"):
+            pattern_id = path.split("/")[-1]
+            self._delete_link_check_ignore_pattern(pattern_id)
         else:
             self._json_response({"error": "Not found"}, 404)
 

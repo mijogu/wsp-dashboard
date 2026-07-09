@@ -18,6 +18,10 @@ from db import (
     get_link_check_site_status,
     get_link_check_site_history,
     get_link_check_run_site_results,
+    get_link_check_ignore_patterns,
+    create_link_check_ignore_pattern,
+    update_link_check_ignore_pattern,
+    delete_link_check_ignore_pattern,
 )
 from link_checker import (
     run_link_check,
@@ -134,6 +138,7 @@ class LinkCheckMixin:
                 return
 
         site_configs = get_all_site_configs()
+        ignore_patterns = [p["pattern"] for p in get_link_check_ignore_patterns(enabled_only=True)]
         run_id = create_link_check_run(
             check_internal=bool(check_internal), check_external=bool(check_external))
         update_link_check_run_totals(run_id, len(sites))
@@ -147,6 +152,7 @@ class LinkCheckMixin:
                 "save_site_run_fn": save_link_check_site_run,
                 "check_internal":  bool(check_internal),
                 "check_external":  bool(check_external),
+                "ignore_patterns": ignore_patterns,
             },
             daemon=True,
         )
@@ -156,3 +162,41 @@ class LinkCheckMixin:
                 f"Link check run #{run_id} started ({len(sites)} sites)")
         self._json_response({"ok": True, "run_id": run_id,
                              "total_sites": len(sites)})
+
+    # ─── Ignore patterns (settings) ──────────────────────────────
+
+    def _get_link_check_ignore_patterns(self):
+        self._json_response(get_link_check_ignore_patterns())
+
+    def _create_link_check_ignore_pattern(self, body):
+        pattern = (body.get("pattern") or "").strip()
+        if not pattern:
+            self._json_response({"error": "pattern required"}, 400)
+            return
+        note = (body.get("note") or "").strip()
+        pattern_id = create_link_check_ignore_pattern(pattern, note)
+        add_log("LinkChecker", "ok", f"Ignore pattern added: {pattern}")
+        self._json_response({"ok": True, "id": pattern_id})
+
+    def _update_link_check_ignore_pattern(self, pattern_id_str, body):
+        try:
+            pattern_id = int(pattern_id_str)
+        except ValueError:
+            self._json_response({"error": "Invalid pattern id"}, 400)
+            return
+        allowed = {"pattern", "note", "enabled"}
+        updates = {k: v for k, v in body.items() if k in allowed}
+        if "enabled" in updates:
+            updates["enabled"] = int(bool(updates["enabled"]))
+        update_link_check_ignore_pattern(pattern_id, **updates)
+        self._json_response({"ok": True})
+
+    def _delete_link_check_ignore_pattern(self, pattern_id_str):
+        try:
+            pattern_id = int(pattern_id_str)
+        except ValueError:
+            self._json_response({"error": "Invalid pattern id"}, 400)
+            return
+        delete_link_check_ignore_pattern(pattern_id)
+        add_log("LinkChecker", "ok", f"Ignore pattern deleted: {pattern_id}")
+        self._json_response({"ok": True})

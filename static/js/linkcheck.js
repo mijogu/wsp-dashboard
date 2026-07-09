@@ -36,6 +36,7 @@ dbg('module', 'linkcheck.js loaded');
         let _lcLastHistoryData = [];      // rows from last loadLcSiteHistory
         let _lcCurrentHistorySite = { id: null, name: '', url: '' };
         let _lcHistoryRowMap = {};        // expandId → history row; rebuilt on each renderLcSiteHistoryBody
+        let _lcRunsCsvByKey = {};         // site key → {links, siteName}; rebuilt on each renderLcRunsView
 
         // Column sort state for each LC table
         // dir: 1 = ascending (▲), -1 = descending (▼)
@@ -65,6 +66,18 @@ dbg('module', 'linkcheck.js loaded');
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
+            return r.json();
+        }
+        async function lcPatch(path, body = {}) {
+            const r = await fetch(path, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            return r.json();
+        }
+        async function lcDelete(path) {
+            const r = await fetch(path, { method: 'DELETE' });
             return r.json();
         }
 
@@ -544,7 +557,11 @@ dbg('module', 'linkcheck.js loaded');
                         try {
                             const links   = await lcGet(`/api/linkcheck/results/${runId}/site/${thisSiteId}`);
                             const siteRow = _lcHistoryRowMap[expandId] || {};
-                            cell.innerHTML = lcStatsBarHtml(siteRow, links) + lcBrokenLinksHtml(links);
+                            cell.innerHTML = lcStatsBarHtml(siteRow, links) + lcBrokenLinksHtml(links, expandId);
+                            const csvBtn = cell.querySelector('.lc-site-csv-btn');
+                            if (csvBtn) csvBtn.addEventListener('click',
+                                () => exportLcSiteBrokenLinksCsv(links, _lcCurrentHistorySite.name));
+                            _wireLcDetailTableSort(cell.querySelector('.lc-detail-table[data-detail-key]'), expandId);
                             expandEl.dataset.loaded = 'true';
                         } catch (e) {
                             cell.innerHTML = `<div class="lc-broken-row" style="color:var(--red); padding:10px;">${escapeHtml(e.message)}</div>`;
@@ -608,17 +625,19 @@ dbg('module', 'linkcheck.js loaded');
 
         // ── Stats bar helper ──────────────────────────────────────────────────────
         /**
-         * Renders a compact stats strip above the broken links list.
+         * Renders a compact strip above the broken links list: an error-type
+         * breakdown (404/5xx/timeout/other — not shown anywhere else) plus a CSV
+         * download button for this site's broken links. Redirect/image counts are
+         * site totals (not just the broken subset), labeled accordingly; the old
+         * external-link count pill was dropped since the Internal/External column
+         * split above already shows that.
          * `site`  — the site summary row (from link_check_site_runs)
          * `links` — the broken links array (already loaded)
          */
         function lcStatsBarHtml(site, links) {
-            const extCount      = site.external_count    ?? 0;
-            const redirectCount = site.redirect_count    ?? 0;
-            const imageCount    = site.image_link_count  ?? 0;
-            const broken        = site.broken_count      ?? links.length;
-
-            if (!extCount && !redirectCount && !imageCount && !broken) return '';
+            const redirectCount = site.redirect_count   ?? 0;
+            const imageCount    = site.image_link_count ?? 0;
+            const broken        = links.length;
 
             const n404     = links.filter(l => l.status_code === 404).length;
             const n5xx     = links.filter(l => l.status_code >= 500 && l.status_code < 600).length;
@@ -626,9 +645,8 @@ dbg('module', 'linkcheck.js loaded');
             const nOther   = broken - n404 - n5xx - nTimeout;
 
             const pills = [];
-            if (extCount)      pills.push(`<span>↗ ${extCount.toLocaleString()} external</span>`);
-            if (redirectCount) pills.push(`<span>↪ ${redirectCount.toLocaleString()} redirect${redirectCount !== 1 ? 's' : ''}</span>`);
-            if (imageCount)    pills.push(`<span>🖼 ${imageCount.toLocaleString()} image link${imageCount !== 1 ? 's' : ''}</span>`);
+            if (redirectCount) pills.push(`<span>↪ ${redirectCount.toLocaleString()} redirect${redirectCount !== 1 ? 's' : ''} <span style="opacity:0.6;">(site total)</span></span>`);
+            if (imageCount)    pills.push(`<span>🖼 ${imageCount.toLocaleString()} image link${imageCount !== 1 ? 's' : ''} <span style="opacity:0.6;">(site total)</span></span>`);
             if (broken > 0) {
                 const bp = [];
                 if (n404)     bp.push(`404: ${n404}`);
@@ -637,33 +655,91 @@ dbg('module', 'linkcheck.js loaded');
                 if (nOther > 0) bp.push(`other: ${nOther}`);
                 if (bp.length) pills.push(`<span style="color:var(--red);">⚠ ${bp.join(' · ')}</span>`);
             }
-            if (!pills.length) return '';
-            return `<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;
+            return `<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; justify-content:space-between;
                         padding:7px 14px; font-size:12px; color:var(--text-muted);
                         border-bottom:1px solid var(--border); background:var(--surface-2);">
-                ${pills.join('')}
+                <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">${pills.join('')}</div>
+                <button class="btn lc-site-csv-btn" style="font-size:11px; padding:3px 10px;" title="Download this site's broken links as CSV">⬇ CSV</button>
             </div>`;
+        }
+
+        /** Downloads a single site's broken links as a standalone CSV. */
+        function exportLcSiteBrokenLinksCsv(links, siteName) {
+            const rows = [['Status/Error', 'Scope', 'Link URL', 'Found On', 'Redirects To']];
+            links.forEach(link => rows.push(_lcCsvBrokenLinkRow(link)));
+            const safeSiteName = (siteName || 'site').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+            const today = new Date().toISOString().slice(0, 10);
+            downloadCsv(rows, `link-check-broken-${safeSiteName}-${today}.csv`);
+        }
+
+        // ── Detail-table sorting ──────────────────────────────────────────────────
+        // Each expanded site's broken-link table sorts independently — keyed by
+        // the same site/run key used for expand state, so multiple expanded
+        // tables (Runs view allows several open at once) don't interfere.
+        let _lcDetailSort  = new Map(); // key → {col, dir}
+        let _lcDetailLinks = new Map(); // key → raw (unsorted) links array, for re-sort without re-fetch
+
+        function _sortLcDetailLinks(links, sort) {
+            if (!sort || !sort.col) return links;
+            const { col, dir } = sort;
+            return [...links].sort((a, b) => {
+                let av, bv;
+                switch (col) {
+                    case 'status':   av = a.status_code ?? 99999; bv = b.status_code ?? 99999; break;
+                    case 'scope':    av = a.is_external ? 1 : 0;  bv = b.is_external ? 1 : 0;   break;
+                    case 'url':      av = (a.link_url    || '').toLowerCase(); bv = (b.link_url    || '').toLowerCase(); break;
+                    case 'foundOn':  av = (a.source_page || '').toLowerCase(); bv = (b.source_page || '').toLowerCase(); break;
+                    case 'redirect': av = (a.redirect_url || '').toLowerCase(); bv = (b.redirect_url || '').toLowerCase(); break;
+                    default: return 0;
+                }
+                if (av < bv) return -1 * dir;
+                if (av > bv) return  1 * dir;
+                return 0;
+            });
+        }
+
+        // Wires click-to-sort on one detail table; re-renders just that table
+        // (from the cached raw links for `key`) and rewires the replacement.
+        function _wireLcDetailTableSort(tableEl, key) {
+            if (!tableEl || !key) return;
+            tableEl.querySelectorAll('th[data-sort-col]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const col = th.dataset.sortCol;
+                    const cur = _lcDetailSort.get(key) || { col: null, dir: 1 };
+                    _lcDetailSort.set(key, cur.col === col ? { col, dir: cur.dir * -1 } : { col, dir: 1 });
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = lcBrokenLinksHtml(_lcDetailLinks.get(key) || [], key);
+                    const replacement = wrapper.firstElementChild;
+                    tableEl.replaceWith(replacement);
+                    _wireLcDetailTableSort(replacement, key);
+                });
+            });
         }
 
         // ── Shared helper: render broken links as a real table ───────────────────
         // Columns: Status | Scope (Internal/External + Image badge) | URL | Found On
         // | Redirects To (omitted entirely when no link in the set has one, to
         // avoid an all-dash column). Feeds both the Runs-view and History-view
-        // expand rows.
-        function lcBrokenLinksHtml(links) {
+        // expand rows. `key` (site/run key, or expandId for History view) scopes
+        // the sort state — pass it whenever the table should be sortable.
+        function lcBrokenLinksHtml(links, key) {
             if (!links.length) {
                 return `<div class="lc-broken-row" style="text-align:center; color:var(--green);">
                     ✓ No broken links
                 </div>`;
             }
+            if (key) _lcDetailLinks.set(key, links);
+            const sort = (key && _lcDetailSort.get(key)) || { col: null, dir: 1 };
+            const sortedLinks = _sortLcDetailLinks(links, sort);
+
             const shortUrl = (url, len) => (url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, len) || (url || '/');
             const linkCell = (url, short) => `<a href="${escapeHtml(url || '#')}" target="_blank" rel="noopener"
                 style="color:var(--accent); font-size:12px; word-break:break-all;"
                 title="${escapeHtml(url || '')}">${escapeHtml(short)}</a>`;
 
-            const hasRedirects = links.some(l => l.redirect_url);
+            const hasRedirects = sortedLinks.some(l => l.redirect_url);
 
-            const rows = links.map(link => {
+            const rows = sortedLinks.map(link => {
                 const statusCell = link.status_code
                     ? `<span style="font-weight:600; color:var(--red);">${link.status_code}</span>`
                     : `<span style="color:var(--text-muted);">${escapeHtml(link.error || 'Error')}</span>`;
@@ -689,13 +765,16 @@ dbg('module', 'linkcheck.js loaded');
             // word-break:break-all URL content causes pathological column-width
             // collapse (long URLs squeeze to a few px while Status/Scope balloon).
             const urlColWidth = hasRedirects ? '32%' : '38%';
-            return `<table class="lc-detail-table">
+            const th = (label, col, width) => key
+                ? _sortTh(label, col, sort, `width:${width};`)
+                : `<th style="width:${width};">${label}</th>`;
+            return `<table class="lc-detail-table" data-detail-key="${escapeHtml(key || '')}">
                 <thead><tr>
-                    <th style="width:64px;">Status</th>
-                    <th style="width:80px;">Scope</th>
-                    <th style="width:${urlColWidth};">URL</th>
-                    <th style="width:${urlColWidth};">Found On</th>
-                    ${hasRedirects ? '<th style="width:20%;">Redirects To</th>' : ''}
+                    ${th('Status', 'status', '64px')}
+                    ${th('Scope', 'scope', '80px')}
+                    ${th('URL', 'url', urlColWidth)}
+                    ${th('Found On', 'foundOn', urlColWidth)}
+                    ${hasRedirects ? th('Redirects To', 'redirect', '20%') : ''}
                 </tr></thead>
                 <tbody>${rows}</tbody>
             </table>`;
@@ -733,6 +812,7 @@ dbg('module', 'linkcheck.js loaded');
             empty.style.display = 'none';
 
             let html = '';
+            _lcRunsCsvByKey = {};
             _sortLcRuns(sites).forEach((site, idx) => {
                 const broken     = site.broken_count ?? 0;
                 const hasBroken  = broken > 0;
@@ -761,15 +841,26 @@ dbg('module', 'linkcheck.js loaded');
                     // Expand row — plain <tr> (no nested tbody) avoids invalid HTML.
                     // broken_links are pre-loaded from the API response.
                     const preloaded = site.broken_links || [];
+                    _lcRunsCsvByKey[key] = { links: preloaded, siteName: site.site_name };
                     html += `<tr class="lc-expand${isExpanded ? ' open' : ''}" data-site-key="${escapeHtml(key)}" data-loaded="true">
                         <td colspan="${COLS}" class="lc-expand-cell">
-                            ${lcStatsBarHtml(site, preloaded)}${lcBrokenLinksHtml(preloaded)}
+                            ${lcStatsBarHtml(site, preloaded)}${lcBrokenLinksHtml(preloaded, key)}
                         </td>
                     </tr>`;
                 }
             });
 
             body.innerHTML = html;
+
+            body.querySelectorAll('.lc-expand .lc-site-csv-btn').forEach(btn => {
+                const key = btn.closest('.lc-expand').dataset.siteKey;
+                const data = _lcRunsCsvByKey[key];
+                if (!data) return;
+                btn.addEventListener('click', () => exportLcSiteBrokenLinksCsv(data.links, data.siteName));
+            });
+            body.querySelectorAll('.lc-detail-table[data-detail-key]').forEach(tableEl => {
+                _wireLcDetailTableSort(tableEl, tableEl.dataset.detailKey);
+            });
 
             body.querySelectorAll('.lc-site-row').forEach(row => {
                 row.addEventListener('click', () => {
@@ -1059,6 +1150,93 @@ dbg('module', 'linkcheck.js loaded');
         document.getElementById('lcSiteSelectDoneBtn').addEventListener('click', closeLcSiteSelectModal);
         document.getElementById('lcSiteSelectOverlay').addEventListener('click', e => {
             if (e.target === e.currentTarget) closeLcSiteSelectModal();
+        });
+
+        // ── Settings modal (ignore patterns) ───────────────────────────────────────
+        // Persistent, global config — separate from the per-run Options modal above.
+        let _lcIgnorePatterns = [];
+
+        async function loadLcIgnorePatterns() {
+            try {
+                _lcIgnorePatterns = await lcGet('/api/linkcheck/ignore-patterns');
+            } catch { _lcIgnorePatterns = []; }
+            renderLcIgnorePatternList();
+        }
+
+        function renderLcIgnorePatternList() {
+            const listEl  = document.getElementById('lcIgnorePatternList');
+            const emptyEl = document.getElementById('lcIgnorePatternEmpty');
+            if (!_lcIgnorePatterns.length) {
+                listEl.innerHTML = '';
+                emptyEl.style.display = '';
+                return;
+            }
+            emptyEl.style.display = 'none';
+            listEl.innerHTML = _lcIgnorePatterns.map(p => `
+                <div class="lc-ignore-row" data-id="${p.id}" style="display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--surface-2); border-radius:6px;">
+                    <input type="checkbox" class="lc-ignore-enabled" ${p.enabled ? 'checked' : ''}
+                           style="accent-color:var(--accent); width:15px; height:15px; cursor:pointer; flex-shrink:0;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:12px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(p.pattern)}">${escapeHtml(p.pattern)}</div>
+                        ${p.note ? `<div style="font-size:11px; color:var(--text-muted);">${escapeHtml(p.note)}</div>` : ''}
+                    </div>
+                    <button class="btn lc-ignore-delete" style="font-size:11px; padding:3px 8px; color:var(--red);">✕</button>
+                </div>
+            `).join('');
+
+            listEl.querySelectorAll('.lc-ignore-row').forEach(row => {
+                const id = row.dataset.id;
+                row.querySelector('.lc-ignore-enabled').addEventListener('change', async e => {
+                    try {
+                        await lcPatch(`/api/linkcheck/ignore-patterns/${id}`, { enabled: e.target.checked });
+                        const p = _lcIgnorePatterns.find(x => String(x.id) === id);
+                        if (p) p.enabled = e.target.checked;
+                    } catch { /* ignore */ }
+                });
+                row.querySelector('.lc-ignore-delete').addEventListener('click', async () => {
+                    try {
+                        await lcDelete(`/api/linkcheck/ignore-patterns/${id}`);
+                        _lcIgnorePatterns = _lcIgnorePatterns.filter(x => String(x.id) !== id);
+                        renderLcIgnorePatternList();
+                    } catch { /* ignore */ }
+                });
+            });
+        }
+
+        async function addLcIgnorePattern() {
+            const patternInput = document.getElementById('lcIgnorePatternInput');
+            const noteInput    = document.getElementById('lcIgnoreNoteInput');
+            const pattern = patternInput.value.trim();
+            if (!pattern) return;
+            try {
+                const result = await lcPost('/api/linkcheck/ignore-patterns', {
+                    pattern, note: noteInput.value.trim(),
+                });
+                if (result.error) return;
+                patternInput.value = '';
+                noteInput.value = '';
+                await loadLcIgnorePatterns();
+            } catch { /* ignore */ }
+        }
+
+        document.getElementById('lcIgnorePatternAddBtn').addEventListener('click', addLcIgnorePattern);
+        document.getElementById('lcIgnorePatternInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter') addLcIgnorePattern();
+        });
+
+        function closeLcSettingsModal() {
+            document.getElementById('lcSettingsOverlay').style.display = 'none';
+            modalRemove('lcSettingsOverlay');
+        }
+        document.getElementById('lcSettingsBtn').addEventListener('click', () => {
+            loadLcIgnorePatterns();
+            document.getElementById('lcSettingsOverlay').style.display = 'flex';
+            modalPush('lcSettingsOverlay', closeLcSettingsModal);
+        });
+        document.getElementById('lcSettingsCloseBtn').addEventListener('click', closeLcSettingsModal);
+        document.getElementById('lcSettingsDoneBtn').addEventListener('click', closeLcSettingsModal);
+        document.getElementById('lcSettingsOverlay').addEventListener('click', e => {
+            if (e.target === e.currentTarget) closeLcSettingsModal();
         });
 
         // ── Default options (Restore / Set) ───────────────────────────────────────

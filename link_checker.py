@@ -325,7 +325,8 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                    run_id: int, site_configs: dict | None = None,
                    save_site_run_fn=None,
                    check_internal: bool = True,
-                   check_external: bool = False):
+                   check_external: bool = False,
+                   ignore_patterns: list[str] | None = None):
     """
     Run link checks on all sites. Call in a background thread.
 
@@ -342,8 +343,12 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
                            Called once per site; records summary even if 0 broken.
         check_internal:    check internal (same-domain) links (default True)
         check_external:    check external (cross-domain) links (default False)
+        ignore_patterns:   case-insensitive substrings; any link URL containing
+                            one is dropped before counting/checking (e.g. calendar
+                            add-links that are noise rather than real breakage)
     """
     global _active_check, _cancel_requested
+    ignore_patterns = [p.lower() for p in (ignore_patterns or []) if p]
     _cancel_requested = False
 
     total_pages_crawled = 0
@@ -423,15 +428,20 @@ def run_link_check(sites: list, add_log_fn, save_result_fn, finish_run_fn,
 
             # Deduplicate: one entry per unique link_url (first occurrence wins).
             # link_meta carries everything needed for checking and DB storage.
+            # Ignored links (e.g. calendar add-links) are dropped here, before
+            # anything else, so they never appear in stats, checks, or results.
             link_meta: dict[str, dict] = {}  # url → {source_page, is_external, is_image}
             for entry in all_links:
                 lu = entry["link_url"]
-                if lu not in link_meta:
-                    link_meta[lu] = {
-                        "source_page": entry["source_page"],
-                        "is_external": entry.get("is_external", False),
-                        "is_image":    entry.get("is_image",    False),
-                    }
+                if lu in link_meta:
+                    continue
+                if ignore_patterns and any(p in lu.lower() for p in ignore_patterns):
+                    continue
+                link_meta[lu] = {
+                    "source_page": entry["source_page"],
+                    "is_external": entry.get("is_external", False),
+                    "is_image":    entry.get("is_image",    False),
+                }
 
             # Aggregate stats that don't require HTTP checking
             site_external_count = sum(1 for m in link_meta.values() if m["is_external"])
