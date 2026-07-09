@@ -586,7 +586,8 @@ dbg('module', 'linkcheck.js loaded');
             const prevVal = _lcSelectedRunId ? String(_lcSelectedRunId) : null;
             sel.innerHTML = _lcRuns.map(r => {
                 const d = new Date((r.started_at || '') + 'Z');
-                const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                const label = (r.is_adhoc ? '🔗 Ad-hoc — ' : '')
+                    + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                     + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
                     + ` — ${r.total_broken ?? 0} broken`
                     + (r.status !== 'completed' ? ` (${r.status})` : '');
@@ -815,7 +816,10 @@ dbg('module', 'linkcheck.js loaded');
 
             if (run.finished_at) {
                 const d = new Date(run.finished_at + 'Z');
-                document.getElementById('lcRunInfo').textContent =
+                const adhocBadge = run.is_adhoc
+                    ? `<span style="background:var(--accent); color:#fff; border-radius:4px; padding:1px 6px; font-size:11px; margin-right:6px;">Ad-hoc</span>`
+                    : '';
+                document.getElementById('lcRunInfo').innerHTML = adhocBadge +
                     `Finished ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
             }
 
@@ -1253,6 +1257,61 @@ dbg('module', 'linkcheck.js loaded');
         document.getElementById('lcSettingsDoneBtn').addEventListener('click', closeLcSettingsModal);
         document.getElementById('lcSettingsOverlay').addEventListener('click', e => {
             if (e.target === e.currentTarget) closeLcSettingsModal();
+        });
+
+        // ── Ad-hoc URL check modal ───────────────────────────────────────────────────
+        // Checks a site that isn't registered in MainWP yet (e.g. pre-onboarding due
+        // diligence). Reuses the run-in-progress UI (lcShowProgress/startLcPoll) —
+        // the backend just feeds run_link_check() a single synthetic site instead of
+        // sweeping the registry.
+        function closeLcAdhocModal() {
+            document.getElementById('lcAdhocOverlay').style.display = 'none';
+            document.getElementById('lcAdhocError').style.display = 'none';
+            modalRemove('lcAdhocOverlay');
+        }
+        document.getElementById('lcAdhocBtn').addEventListener('click', () => {
+            document.getElementById('lcAdhocUrlInput').value = '';
+            document.getElementById('lcAdhocNameInput').value = '';
+            document.getElementById('lcAdhocError').style.display = 'none';
+            document.getElementById('lcAdhocOverlay').style.display = 'flex';
+            modalPush('lcAdhocOverlay', closeLcAdhocModal);
+        });
+        document.getElementById('lcAdhocCloseBtn').addEventListener('click', closeLcAdhocModal);
+        document.getElementById('lcAdhocCancelBtn').addEventListener('click', closeLcAdhocModal);
+        document.getElementById('lcAdhocOverlay').addEventListener('click', e => {
+            if (e.target === e.currentTarget) closeLcAdhocModal();
+        });
+
+        document.getElementById('lcAdhocStartBtn').addEventListener('click', async () => {
+            const url    = document.getElementById('lcAdhocUrlInput').value.trim();
+            const name   = document.getElementById('lcAdhocNameInput').value.trim();
+            const errEl  = document.getElementById('lcAdhocError');
+            const startBtn = document.getElementById('lcAdhocStartBtn');
+            errEl.style.display = 'none';
+            if (!url) {
+                errEl.textContent = 'URL is required';
+                errEl.style.display = '';
+                return;
+            }
+
+            startBtn.disabled = true;
+            try {
+                const result = await lcPost('/api/linkcheck/run-adhoc', { url, name });
+                if (result.error) {
+                    errEl.textContent = result.error;
+                    errEl.style.display = '';
+                    return;
+                }
+                closeLcAdhocModal();
+                setLcView('runs'); // ad-hoc results only ever show up in Runs
+                lcShowProgress({ total_sites: result.total_sites, checked_sites: 0, broken_links: 0 });
+                startLcPoll();
+            } catch (e) {
+                errEl.textContent = e.message;
+                errEl.style.display = '';
+            } finally {
+                startBtn.disabled = false;
+            }
         });
 
         // ── Default options (Restore / Set) ───────────────────────────────────────

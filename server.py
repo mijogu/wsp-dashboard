@@ -209,6 +209,8 @@ class DashboardHandler(
             self._cancel_regression_run()
         elif path == "/api/linkcheck/run":
             self._start_link_check(body)
+        elif path == "/api/linkcheck/run-adhoc":
+            self._start_adhoc_link_check(body)
         elif path == "/api/linkcheck/cancel":
             self._cancel_link_check()
         elif path == "/api/linkcheck/ignore-patterns":

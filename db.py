@@ -323,6 +323,8 @@ def init_db():
         "ALTER TABLE link_check_site_runs ADD COLUMN external_broken_count INTEGER DEFAULT 0",
         # Onboarding
         "ALTER TABLE site_config ADD COLUMN hidden_from_onboarding INTEGER NOT NULL DEFAULT 0",
+        # Link checker v4 — ad-hoc (unregistered) URL checks
+        "ALTER TABLE link_check_runs ADD COLUMN is_adhoc INTEGER DEFAULT 0",
     ]:
         try:
             conn.execute(migration)
@@ -840,12 +842,15 @@ def get_results_for_site(site_id) -> list:
 # ─── Link Checker ────────────────────────────────────────────
 
 
-def create_link_check_run(check_internal: bool = True, check_external: bool = False) -> int:
+def create_link_check_run(check_internal: bool = True, check_external: bool = False,
+                           is_adhoc: bool = False) -> int:
     """Create a new link check run. Returns the run_id."""
     conn = _get_conn()
     cur = conn.execute(
-        "INSERT INTO link_check_runs (started_at, check_internal, check_external) VALUES (?, ?, ?)",
-        (datetime.utcnow().isoformat(), 1 if check_internal else 0, 1 if check_external else 0)
+        "INSERT INTO link_check_runs (started_at, check_internal, check_external, is_adhoc) "
+        "VALUES (?, ?, ?, ?)",
+        (datetime.utcnow().isoformat(), 1 if check_internal else 0, 1 if check_external else 0,
+         1 if is_adhoc else 0)
     )
     conn.commit()
     return cur.lastrowid
@@ -978,12 +983,12 @@ def get_link_check_site_status() -> list:
                prev.links_checked AS prev_links_checked,
                prev.broken_count  AS prev_broken_count
         FROM link_check_site_runs sr
-        JOIN link_check_runs r ON r.id = sr.run_id AND r.status = 'completed'
+        JOIN link_check_runs r ON r.id = sr.run_id AND r.status = 'completed' AND r.is_adhoc = 0
         -- Only the most recent completed run for each site
         JOIN (
             SELECT sr2.site_id, MAX(sr2.run_id) AS max_run_id
             FROM link_check_site_runs sr2
-            JOIN link_check_runs r2 ON r2.id = sr2.run_id AND r2.status = 'completed'
+            JOIN link_check_runs r2 ON r2.id = sr2.run_id AND r2.status = 'completed' AND r2.is_adhoc = 0
             GROUP BY sr2.site_id
         ) latest ON latest.site_id = sr.site_id AND latest.max_run_id = sr.run_id
         -- Previous completed run for each site (for delta badges)
@@ -996,6 +1001,7 @@ def get_link_check_site_status() -> list:
                   WHERE sr3.site_id = sr.site_id
                     AND sr3.run_id < sr.run_id
                     AND r3.status = 'completed'
+                    AND r3.is_adhoc = 0
               )
         ORDER BY sr.broken_count DESC, sr.site_name
         """

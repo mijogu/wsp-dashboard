@@ -371,6 +371,7 @@
                 <button class="btn" id="lcCancelBtn" style="display:none; background:var(--red-bg); border-color:var(--red); color:var(--red);">✕ Cancel</button>
                 <button class="btn" id="lcSiteSelectBtn" style="font-size:12px; padding:5px 12px;">⚙ Options <span id="lcSiteCount" style="opacity:0.6;"></span></button>
                 <button class="btn" id="lcSettingsBtn" style="font-size:12px; padding:5px 12px;" title="Ignore patterns and other Link Checker settings">🛠 Settings</button>
+                <button class="btn" id="lcAdhocBtn" style="font-size:12px; padding:5px 12px;" title="Check a URL that isn't registered yet (e.g. a prospective client's site)">🔗 Ad-hoc Check</button>
                 <div id="lcViewToggle" style="display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; font-size:12px; margin-left:4px;">
                     <button id="lcViewSites" class="btn btn-primary" style="border:0; border-radius:0; padding:5px 14px; font-size:12px;">Sites</button>
                     <button id="lcViewRuns" class="btn" style="border:0; border-radius:0; padding:5px 14px; font-size:12px;">Runs</button>
@@ -506,6 +507,30 @@
                     </div>
                     <div style="padding:10px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end;">
                         <button class="btn btn-primary" id="lcSettingsDoneBtn" style="font-size:13px; padding:6px 20px;">Done</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ad-hoc URL Check modal -->
+            <div id="lcAdhocOverlay" class="modal-overlay" data-modal-closeable style="z-index:240;">
+                <div class="modal" style="max-width:440px; width:90vw; padding:0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border);">
+                        <h3 style="font-size:14px; font-weight:600;">Ad-hoc Link Check</h3>
+                        <button class="btn" id="lcAdhocCloseBtn" style="font-size:12px; padding:4px 10px;">✕</button>
+                    </div>
+                    <div style="padding:14px 18px;">
+                        <div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">
+                            Check a site that isn't registered in MainWP yet — e.g. a prospective client's site during due diligence. Always checks internal + external links. Won't appear in the Sites view; findable later in Runs history.
+                        </div>
+                        <label style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">URL</label>
+                        <input type="text" id="lcAdhocUrlInput" class="filter-input" placeholder="https://example.com" style="width:100%; margin:4px 0 12px; font-size:13px; box-sizing:border-box;">
+                        <label style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-muted);">Name (optional)</label>
+                        <input type="text" id="lcAdhocNameInput" class="filter-input" placeholder="Defaults to domain" style="width:100%; margin:4px 0 4px; font-size:13px; box-sizing:border-box;">
+                        <div id="lcAdhocError" style="color:var(--red); font-size:12px; margin-top:6px; display:none;"></div>
+                    </div>
+                    <div style="padding:10px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px;">
+                        <button class="btn" id="lcAdhocCancelBtn" style="font-size:13px; padding:6px 16px;">Cancel</button>
+                        <button class="btn btn-primary" id="lcAdhocStartBtn" style="font-size:13px; padding:6px 20px;">Start Check</button>
                     </div>
                 </div>
             </div>

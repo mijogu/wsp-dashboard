@@ -1,5 +1,8 @@
 """Link checker route handlers."""
+import hashlib
+import re
 import threading
+from urllib.parse import urlparse
 
 from routes import get_settings, add_log
 from db import (
@@ -28,6 +31,37 @@ from link_checker import (
     get_active_check,
     request_cancel as request_link_check_cancel,
 )
+
+
+_HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[0-9]{1,5})?$", re.I)
+
+
+def _normalize_adhoc_url(raw: str) -> str:
+    """Trim, default to https://, and validate an ad-hoc check's input URL."""
+    raw = (raw or "").strip()
+    if not raw:
+        raise ValueError("URL required")
+    if not re.match(r"^https?://", raw, re.I):
+        raw = "https://" + raw
+    netloc = urlparse(raw).netloc
+    if not netloc or not _HOSTNAME_RE.match(netloc):
+        raise ValueError("Invalid URL")
+    return raw
+
+
+def _adhoc_site_id(normalized_url: str) -> int:
+    """
+    Deterministic synthetic site_id for an ad-hoc (unregistered) URL — always
+    negative so it can never collide with a real MainWP site id. Stable across
+    process restarts (uses hashlib, not Python's per-process-randomized
+    built-in hash()) and keyed on domain only, so repeat checks of the same
+    site (regardless of path/query/www./scheme) land in the same history.
+    """
+    host = urlparse(normalized_url).netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    digest = hashlib.sha256(host.encode()).hexdigest()
+    return -(int(digest[:15], 16) % 2_000_000_000 + 1)
 
 
 class LinkCheckMixin:
@@ -162,6 +196,60 @@ class LinkCheckMixin:
                 f"Link check run #{run_id} started ({len(sites)} sites)")
         self._json_response({"ok": True, "run_id": run_id,
                              "total_sites": len(sites)})
+
+    def _start_adhoc_link_check(self, body=None):
+        """
+        Kick off a link check against a single URL that isn't registered in
+        MainWP — e.g. a prospective client's site during due diligence.
+        Reuses run_link_check() unchanged; the only difference from a normal
+        run is a single synthetic site instead of a registry sweep, and
+        always checking both internal + external links (a due-diligence
+        audit should be thorough by default).
+        """
+        active = get_active_check()
+        if active:
+            self._json_response({
+                "error": "A link check is already running",
+                "active_run": active,
+            }, 409)
+            return
+
+        if body is None:
+            body = self._read_body()
+        try:
+            url = _normalize_adhoc_url(body.get("url"))
+        except ValueError as e:
+            self._json_response({"error": str(e)}, 400)
+            return
+
+        site_id = _adhoc_site_id(url)
+        domain = urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        name = (body.get("name") or "").strip() or domain
+        sites = [{"id": site_id, "name": name, "url": url}]
+
+        ignore_patterns = [p["pattern"] for p in get_link_check_ignore_patterns(enabled_only=True)]
+        run_id = create_link_check_run(check_internal=True, check_external=True, is_adhoc=True)
+        update_link_check_run_totals(run_id, 1)
+
+        t = threading.Thread(
+            target=run_link_check,
+            args=(sites, add_log, save_link_check_result,
+                  finish_link_check_run, run_id),
+            kwargs={
+                "site_configs":    None,
+                "save_site_run_fn": save_link_check_site_run,
+                "check_internal":  True,
+                "check_external":  True,
+                "ignore_patterns": ignore_patterns,
+            },
+            daemon=True,
+        )
+        t.start()
+
+        add_log("LinkChecker", "info", f"Ad-hoc link check run #{run_id} started ({url})")
+        self._json_response({"ok": True, "run_id": run_id, "total_sites": 1})
 
     # ─── Ignore patterns (settings) ──────────────────────────────
 
