@@ -752,10 +752,18 @@ dbg('module', 'linkcheck.js loaded');
                 const redirectCell = hasRedirects
                     ? `<td>${link.redirect_url ? linkCell(link.redirect_url, shortUrl(link.redirect_url, 60)) : '<span style="color:var(--text-muted);">—</span>'}</td>`
                     : '';
+                // External link URLs show the full URL including domain — the
+                // domain *is* the useful info there. Internal links stay
+                // domain-stripped for readability (always the site's own domain).
+                // Found On is always the site's own domain regardless of link
+                // scope, so it stays stripped either way.
+                const urlDisplay = link.is_external
+                    ? linkCell(link.link_url, link.link_url || '/')
+                    : linkCell(link.link_url, shortUrl(link.link_url, 80));
                 return `<tr>
                     <td style="white-space:nowrap;">${statusCell}</td>
                     <td style="white-space:nowrap;">${scopeBadge}${imageBadge}</td>
-                    <td>${linkCell(link.link_url, shortUrl(link.link_url, 80))}</td>
+                    <td>${urlDisplay}</td>
                     <td>${linkCell(link.source_page, shortUrl(link.source_page, 60))}</td>
                     ${redirectCell}
                 </tr>`;
